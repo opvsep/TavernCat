@@ -323,10 +323,11 @@ function buildHost() {
                 }
                 pushLog('info', `程序聊天记录：接口返回 ${data.length} 条`);
                 if (data.length > 0) {
+                    const summary = data.slice(0, 40).map((c) => `${String(c.avatar ?? '?')}|${String(c.file_name ?? c.file_id ?? '?')}`).join('  ');
+                    pushLog('info', `条目清单：${summary}`);
                     const sample = { ...(data[0] ?? {}) };
-                    pushLog('info', `首条字段：${Object.keys(sample).join(', ')}`);
-                    if (!sample.avatar || !sample.file_id) {
-                        pushLog('warn', `首条缺少 avatar/file_id：${JSON.stringify(sample).slice(0, 160)}`);
+                    if (!sample.avatar && !sample.file_id && !sample.file_name) {
+                        pushLog('warn', `条目字段异常：${JSON.stringify(sample).slice(0, 160)}`);
                     }
                 }
                 const items = data
@@ -817,7 +818,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.2';
+const VERSION = '0.7.3';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
