@@ -557,6 +557,17 @@ function bindAdvancedEvents(root) {
         refreshSessionTable();
     });
 
+    // 手动绑定：把“酒馆当前打开的聊天”绑到指定 QQ 会话（无需 QQ 先发言）
+    $('#ncb_bind_current')?.addEventListener('click', () => {
+        const raw = String($('#ncb_bind_peer')?.value ?? '').trim();
+        if (!/^(g|p):\d+$/.test(raw)) {
+            notify('error', '请按格式填写：g:群号 或 p:QQ号，例如 g:123456789 / p:10001');
+            return;
+        }
+        bindCurrentChatToPeer(raw);
+        if ($('#ncb_bind_peer')) $('#ncb_bind_peer').value = '';
+    });
+
     $('#ncb_clear_log')?.addEventListener('click', () => {
         logLines.length = 0;
         const box = $('#ncb_log');
@@ -566,7 +577,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {

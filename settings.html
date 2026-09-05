@@ -66,8 +66,12 @@
         </div>
 
         <div class="tc-section">
-            <div class="tc-title"><i class="fa-solid fa-list"></i> QQ 会话绑定
-                <span class="tc-hint">首次使用：把机器人拉进群并 @它，或直接私聊它，会自动按默认角色建会话</span>
+            <div class="tc-title"><i class="fa-solid fa-link"></i> QQ 会话绑定
+                <span class="tc-hint">把某个 QQ 会话接到酒馆里"当前打开的聊天"（续接原有历史，不新建）</span>
+            </div>
+            <div class="tc-row tc-bindbar">
+                <input type="text" id="ncb_bind_peer" class="text_pole" placeholder="填 QQ 会话：g:群号 或 p:好友QQ号，例如 g:123456789 / p:10001" />
+                <button id="ncb_bind_current" class="menu_button">把当前酒馆聊天绑到此会话</button>
             </div>
             <table class="tc-table">
                 <thead><tr><th>QQ 会话</th><th>角色</th><th>聊天文件</th><th>操作</th></tr></thead>
