@@ -80,7 +80,7 @@ export function chunkText(text, maxChars = 1800) {
     return chunks;
 }
 
-const COMMAND_NAMES = ['/指令', '/help', '/帮助', '/引导', '/角色列表', '/角色', '/重置', '/清空', '/解绑', '/初始化', '/状态', '/关闭', '/开启'];
+const COMMAND_NAMES = ['/指令', '/help', '/帮助', '/引导', '/历史', '/历史记录', '/角色列表', '/角色', '/重置', '/清空', '/解绑', '/初始化', '/状态', '/关闭', '/开启'];
 
 export class NapcatBridge {
     /**
@@ -452,6 +452,29 @@ export class NapcatBridge {
         return this.host.listCharacters?.().find((c) => c.key === characterKey)?.name ?? characterKey;
     }
 
+    /** 该会话的历史聊天列表（当前绑定置顶，去重） */
+    _historyItems(peerKey) {
+        const items = [];
+        const seen = new Set();
+        const cur = this.settings.mapping?.[peerKey];
+        const hist = this.settings.bindings?.[peerKey] ?? {};
+        const push = (characterKey, chatName) => {
+            if (!chatName || seen.has(chatName)) return;
+            seen.add(chatName);
+            items.push({ characterKey, chatName });
+        };
+        if (cur?.chatName) push(cur.characterKey, cur.chatName);
+        for (const [characterKey, chatName] of Object.entries(hist)) push(characterKey, chatName);
+        return items;
+    }
+
+    /** 白名单判定：未配置白名单（空）时不限制；配置后仅白名单成员 */
+    _isWhitelisted(userId) {
+        const owners = this.settings.ownerIds ?? [];
+        if (owners.length === 0) return true;
+        return owners.map((x) => String(x)).includes(String(userId));
+    }
+
     // ---------- 指令 ----------
     async _runCommand(norm, text) {
         const parts = text.split(/\s+/).filter(Boolean);
@@ -468,6 +491,7 @@ export class NapcatBridge {
                     '【Tavern Cat】可用指令：',
                     '/指令 - 显示本指令列表',
                     '/引导 - 查看当前接入状态与指引',
+                    '/历史 - 查看并切换本会话的历史聊天（仅白名单）',
                     '/角色列表 - 查看可选角色',
                     '/角色 <名称或序号> - 切换本会话角色（新角色会立即发开场白）',
                     '/重置 - 清空本会话上下文并重新开场',
@@ -560,6 +584,46 @@ export class NapcatBridge {
                 delete this.settings.peerEnabled[peerKey]; // 开关复位为默认开启
                 this.host.persist();
                 reply = '本会话已解绑，恢复为“未接入”初始状态：再发任意消息会按默认角色重新接入（并重新收到接入引导）。\n提示：若想绑定到酒馆里指定的已有聊天，可在酒馆扩展「进阶设置 → QQ 会话绑定」中设置。';
+                break;
+            }
+            case '/历史':
+            case '/历史记录': {
+                const peerKey = norm.peerKey;
+                if (!this._isWhitelisted(norm.userId)) {
+                    reply = '无权使用该指令：/历史 仅限白名单用户调用（可在扩展「进阶设置 → 私聊白名单」中添加你的 QQ）。';
+                    break;
+                }
+                const items = this._historyItems(peerKey);
+                if (!args) {
+                    if (items.length === 0) {
+                        reply = '本会话还没有历史聊天记录。';
+                    } else {
+                        reply = [
+                            '【Tavern Cat】本会话历史聊天：',
+                            ...items.map((it, i) => `${i + 1}. ${this._charName(it.characterKey)} · ${it.chatName}`),
+                            '',
+                            '回复 /历史 <编号> 切换到对应聊天（如 /历史 1）',
+                        ].join('\n');
+                    }
+                } else {
+                    const n = Number(args);
+                    const target = Number.isInteger(n) && n >= 1 && n <= items.length ? items[n - 1] : null;
+                    if (!target) {
+                        reply = `编号无效（1-${items.length}）。先发 /历史 查看列表。`;
+                        break;
+                    }
+                    try {
+                        const switched = await this.host.switchTo(target.characterKey, target.chatName, peerKey);
+                        const chatName = switched.chatName;
+                        this.settings.mapping[peerKey] = { characterKey: target.characterKey, chatName };
+                        this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
+                        this.settings.bindings[peerKey][target.characterKey] = chatName;
+                        this.host.persist();
+                        reply = `已切换到历史聊天：「${this._charName(target.characterKey)}」/ ${chatName}（继续原对话）`;
+                    } catch (err) {
+                        reply = `切换失败：${err?.message ?? err}（该聊天可能已被删除）`;
+                    }
+                }
                 break;
             }
             case '/状态': {

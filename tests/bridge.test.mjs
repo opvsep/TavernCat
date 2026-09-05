@@ -492,6 +492,44 @@ test('角色有自定义头像：新接入时先发头像图片，再发开场�
     }
 });
 
+test('/历史 白名单可查看与切换；非白名单被拒绝', async () => {
+    const ctx = await setup({
+        settings: {
+            ownerIds: [10086],
+            mapping: { 'p:10086': { characterKey: 'av-w', chatName: 'W-聊天9' } },
+            bindings: { 'p:10086': { 'av-amiya': 'c1', 'av-w': 'W-聊天9' } },
+        },
+        tavern: { greetings: {} },
+    });
+    try {
+        // 白名单用户查看历史：当前聊天置顶 + 阿米娅 c1
+        ctx.server.pushPrivateMessage({ userId: 10086, nickname: '主人', messageId: 9901, segments: [{ type: 'text', data: { text: '/历史' } }] });
+        assert.ok(await waitSentCount(ctx.server, 1));
+        const list = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(list, /W-聊天9/);
+        assert.match(list, /阿米娅/);
+        assert.match(list, /历史 <编号>/);
+
+        // 选择第 2 项 -> 切回 阿米娅/c1
+        ctx.server.pushPrivateMessage({ userId: 10086, nickname: '主人', messageId: 9902, segments: [{ type: 'text', data: { text: '/历史 2' } }] });
+        assert.ok(await waitSentCount(ctx.server, 2));
+        const sel = ctx.server.sent[1].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(sel, /已切换到历史聊天/);
+        assert.deepEqual(ctx.settings.mapping['p:10086'], { characterKey: 'av-amiya', chatName: 'c1' });
+
+        // 非白名单用户（群内 @ 触发）被拒绝
+        ctx.server.pushGroupMessage({
+            groupId: 777, userId: 55555, nickname: '路人', messageId: 9903,
+            segments: [{ type: 'at', data: { qq: String(ctx.server.selfId) } }, { type: 'text', data: { text: '/历史' } }],
+        });
+        assert.ok(await waitSentCount(ctx.server, 3));
+        const deny = ctx.server.sent[2].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(deny, /无权/);
+    } finally {
+        await teardown(ctx);
+    }
+});
+
 test('工具函数：chunkText 与 parsePeerKey', () => {
     assert.deepEqual(chunkText('', 10), []);
     const c = chunkText('a'.repeat(10) + '\n' + 'b'.repeat(10), 10);
