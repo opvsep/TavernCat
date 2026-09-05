@@ -172,12 +172,12 @@ export class OneBotClient {
         }
         if (!frame || typeof frame !== 'object') return;
 
-        // 元事件：记录自身 QQ 号与心跳间隔
-        if (frame.post_type === 'meta_event') {
-            if (frame.self_id) this.selfId = Number(frame.self_id);
-            if (frame.meta_event_type === 'heartbeat' && frame.interval > 0) {
-                this._heartbeatIntervalMs = Number(frame.interval);
-            }
+        // 任何事件都携带 self_id：统一记录机器人自身 QQ 号
+        if (frame.self_id) this.selfId = Number(frame.self_id);
+
+        // 元事件：额外记录心跳间隔
+        if (frame.post_type === 'meta_event' && frame.meta_event_type === 'heartbeat' && frame.interval > 0) {
+            this._heartbeatIntervalMs = Number(frame.interval);
         }
         if (this.onEvent) {
             try { this.onEvent(frame); } catch (err) { this.logger.error('[NapCat] onEvent 回调异常:', err); }

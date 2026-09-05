@@ -130,6 +130,40 @@ function findCharIndex(characterKey) {
     return hub.characters.findIndex((c) => String(c.avatar) === characterKey);
 }
 
+/** 在线发送头像：页面读取图片内容转 base64 直传；读不到时退回 URL 交给 NapCat 下载 */
+async function sendAvatarOnline(fileName) {
+    const url = `${location.origin}/img/avatars/${encodeURIComponent(fileName)}`;
+    try {
+        const res = await fetch(url, { cache: 'force-cache' });
+        if (!res.ok) {
+            pushLog('warn', `头像 URL 状态 ${res.status}，退回 URL 发送：${url}`);
+            return { file: url };
+        }
+        const ct = res.headers.get('content-type') ?? '';
+        if (!ct.startsWith('image/')) {
+            pushLog('warn', `头像响应类型异常（${ct}），退回 URL 发送：${url}`);
+            return { file: url };
+        }
+        const blob = await res.blob();
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result ?? ''));
+            reader.onerror = () => reject(new Error('FileReader 失败'));
+            reader.readAsDataURL(blob);
+        });
+        const b64 = String(dataUrl).split(',')[1] ?? '';
+        if (!b64) {
+            pushLog('warn', `头像转码为空，退回 URL 发送：${url}`);
+            return { file: url };
+        }
+        pushLog('info', `角色头像：base64 直传（${Math.round(b64.length / 1024)}KB）`);
+        return { file: `base64://${b64}` };
+    } catch (err) {
+        pushLog('warn', `头像读取失败（${err?.message ?? err}），退回 URL 发送：${url}`);
+        return { file: url };
+    }
+}
+
 function buildHost() {
     return {
         isReady: () => hub.characters.length > 0,
@@ -218,46 +252,25 @@ function buildHost() {
             }
             const fileName = String(av);
 
-            // 1) 本地目录直读（用户配置过 charactersDir 时）
+            // 1) 用户配置了本地目录 -> 用本地路径（NapCat 直读）；失败时 bridge 会自动换在线方式
             const dir = String(config().charactersDir ?? '').trim();
             if (dir) {
                 const local = `${dir.replace(/[\\/]+$/, '')}/${fileName}`;
                 pushLog('info', `角色头像：按本地路径发送 ${local}`);
-                return { file: local };
+                return { file: local, fallbackFileName: fileName };
             }
 
-            // 2) 页面读取图片内容 -> base64 直传
-            const url = `${location.origin}/img/avatars/${encodeURIComponent(fileName)}`;
-            try {
-                const res = await fetch(url, { cache: 'force-cache' });
-                if (!res.ok) {
-                    // 3) 读不到也照发 URL，交给 NapCat 侧处理（尽量别静默不发）
-                    pushLog('warn', `头像 URL 状态 ${res.status}，退回 URL 发送：${url}`);
-                    return { file: url };
-                }
-                const ct = res.headers.get('content-type') ?? '';
-                if (!ct.startsWith('image/')) {
-                    pushLog('warn', `头像响应类型异常（${ct}），退回 URL 发送：${url}`);
-                    return { file: url };
-                }
-                const blob = await res.blob();
-                const dataUrl = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(String(reader.result ?? ''));
-                    reader.onerror = () => reject(new Error('FileReader 失败'));
-                    reader.readAsDataURL(blob);
-                });
-                const b64 = String(dataUrl).split(',')[1] ?? '';
-                if (!b64) {
-                    pushLog('warn', `头像转码为空，退回 URL 发送：${url}`);
-                    return { file: url };
-                }
-                pushLog('info', `角色头像：base64 直传（${Math.round(b64.length / 1024)}KB）`);
-                return { file: `base64://${b64}` };
-            } catch (err) {
-                pushLog('warn', `头像读取失败（${err?.message ?? err}），退回 URL 发送：${url}`);
-                return { file: url };
-            }
+            // 2) 未配置目录 -> 在线方式（base64 直传 / URL）
+            return sendAvatarOnline(fileName);
+        },
+
+        /** 在线方式（忽略本地目录配置）：本地路径发送失败时由 bridge 调用此兜底 */
+        getAvatarOnline: async (characterKey) => {
+            const idx = findCharIndex(characterKey);
+            if (idx < 0) return null;
+            const av = hub.characters[idx]?.avatar;
+            if (!av || av === 'none') return null;
+            return sendAvatarOnline(String(av));
         },
 
         getGreeting: (characterKey) => {
@@ -712,7 +725,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.1';
+const VERSION = '0.6.2';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
