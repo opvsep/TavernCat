@@ -33,7 +33,7 @@ const EXT_ID = EXT_ID_MATCH ? EXT_ID_MATCH[1] : 'third-party/TavernCat';
 const LOGO_URL = 'https://camo.githubusercontent.com/b1e872f1bb3e3cfba16a94dee84ae17fb9fc9038a95b04e1538cc88a4ee92507/68747470733a2f2f6e61706e656b6f2e6769746875622e696f2f6173736574732f6e65776e65776c6f676f2e706e67';
 
 const DEFAULT_CONFIG = {
-    wsUrl: 'ws://127.0.0.1:3001',
+    wsUrl: 'ws://127.0.0.1:2333',
     token: '',
     autoConnect: false,
     defaultCharacterKey: '',
@@ -522,7 +522,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
@@ -624,6 +624,11 @@ export async function init() {
         extension_settings[MODULE] = { ...DEFAULT_CONFIG, ...extension_settings[MODULE] };
     }
     const cfg = config();
+    // 旧默认端口迁移：3001 -> 2333（仅当地址仍是旧默认值时才改，用户自定义地址不动）
+    if (cfg.wsUrl === 'ws://127.0.0.1:3001') {
+        cfg.wsUrl = 'ws://127.0.0.1:2333';
+        persist();
+    }
     cfg.ownerIds = parseOwnerIds(cfg.ownerIdsText);
     persist();
 

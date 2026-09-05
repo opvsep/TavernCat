@@ -1,4 +1,4 @@
-// OneBot 11 WebSocket 客户端（连 NapCat 的「WebSocket 服务器」，默认 ws://127.0.0.1:3001）
+// OneBot 11 WebSocket 客户端（连 NapCat 的「WebSocket 服务器」，默认 ws://127.0.0.1:2333）
 // 兼容浏览器原生 WebSocket 与 Node 18+ 的全局 WebSocket，因此同一份代码可在酒馆页面与 Node 测试中运行。
 //
 // 依据 NapCat 源码（packages/napcat-onebot/network/websocket-server.ts）：
@@ -22,7 +22,7 @@ const HEARTBEAT_TIMEOUT_MULTIPLIER = 3;   // 超过 3 个心跳周期没有任�
 export class OneBotClient {
     /**
      * @param {object} options
-     * @param {string} options.url       形如 ws://127.0.0.1:3001（内部会自动拼 access_token query）
+     * @param {string} options.url       形如 ws://127.0.0.1:2333（内部会自动拼 access_token query）
      * @param {string} [options.token]   NapCat 网络服务配置的 token（可选）
      * @param {object} [options.logger]  {log, warn, error} 缺省用 console
      */
