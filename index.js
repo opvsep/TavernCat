@@ -212,7 +212,8 @@ function buildHost() {
             const idx = findCharIndex(characterKey);
             if (idx < 0) return null;
             const av = hub.characters[idx]?.avatar;
-            if (!av || av === 'none' || /^default/i.test(String(av))) return null; // 默认头像不发送
+            // 只有“没有头像”或系统默认图 user-default.png 不发送，其余图片名一律直接发
+            if (!av || av === 'none' || av === 'user-default.png') return null;
             const fileName = String(av);
 
             // 1) 本地目录直读（用户配置过 charactersDir 时）
@@ -643,7 +644,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.8';
+const VERSION = '0.5.9';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
