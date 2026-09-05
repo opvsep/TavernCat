@@ -325,7 +325,12 @@ export class NapcatBridge {
             }
             if (!defaultKey) {
                 this._log('error', `会话 ${peerKey} 无绑定且没有可用角色`);
-                await this._safeReply(norm, '暂时无法自动接入。想要立刻开启对话，请使用 /新对话 指令。');
+                await this._safeReply(norm, [
+                    '暂时无法自动接入。',
+                    '· 想要立刻开启对话，请使用 /新对话 指令；',
+                    '· 还没解决？请在酒馆添加/导入角色卡并刷新页面，再到扩展「基础设置 → 新会话默认角色」里选好角色，之后重新发送消息即可自动接入；',
+                    '· /指令 可查看全部可用指令。',
+                ].join('\n'));
                 return;
             }
             binding = { characterKey: defaultKey, chatName: null };
@@ -337,7 +342,11 @@ export class NapcatBridge {
         const charExists = chars.some((c) => c.key === binding.characterKey);
         if (!charExists) {
             this._log('error', `角色 ${binding.characterKey} 不存在，请重新绑定`);
-            await this._safeReply(norm, '当前绑定的角色已不存在。想要立刻开启对话，请使用 /新对话 指令。');
+            await this._safeReply(norm, [
+                '当前绑定的角色已不存在，暂时无法自动接入。',
+                '· 想要立刻开启对话，请使用 /新对话 指令（将按默认角色重新接入）；',
+                '· /角色列表 可查看现有角色，/指令 查看全部指令。',
+            ].join('\n'));
             return;
         }
 
