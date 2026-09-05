@@ -224,6 +224,7 @@ export class NapcatBridge {
     /** 一次完整回合：定位/创建会话 -> 注入用户消息 -> 生成 -> 回传 */
     async _runTurn(norm, text) {
         const peerKey = norm.peerKey;
+        const hadBinding = !!this.settings.mapping[peerKey];
         let binding = this.settings.mapping[peerKey] ?? null;
 
         // 1) 没有绑定 -> 用默认角色新建
@@ -297,6 +298,15 @@ export class NapcatBridge {
             this.inTurn = false;
             this.turnPeerKey = null;
             this._emitStats();
+        }
+
+        // 5) 首次自动建立绑定 -> 通知 UI 弹出“绑定到哪个聊天”的引导
+        if (!hadBinding && this.settings.mapping[peerKey] && this.onBindingCreated) {
+            try {
+                this.onBindingCreated(peerKey, { ...this.settings.mapping[peerKey] });
+            } catch (err) {
+                this._log('warn', `onBindingCreated 回调异常: ${err?.message ?? err}`);
+            }
         }
     }
 

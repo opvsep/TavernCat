@@ -248,6 +248,8 @@ test('新会话自动绑定默认角色并放开场白；/角色 切换绑定；
         settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
         tavern: { greetings: { 'av-amiya': '你好呀，{{user}}，我是阿米娅~', 'av-w': '哼哼，我是W。' } },
     });
+    const createdEvents = [];
+    ctx.bridge.onBindingCreated = (p, b) => createdEvents.push({ p, b });
     try {
         // 私聊新用户（无绑定）-> 自动建会话 + 开场白 + 回复
         ctx.server.pushPrivateMessage({ userId: 555, nickname: '新朋友', messageId: 9201, segments: [{ type: 'text', data: { text: '你是谁' } }] });
@@ -255,6 +257,12 @@ test('新会话自动绑定默认角色并放开场白；/角色 切换绑定；
         assert.equal(ctx.server.sent[0].action, 'send_private_msg');
         assert.equal(ctx.server.sent[0].params.message[0].data.text, '你好呀，新朋友，我是阿米娅~');
         assert.equal(ctx.server.sent[1].params.message[0].data.text, '回复：你是谁');
+
+        // 首次自动绑定应触发 onBindingCreated（供 UI 弹“绑定到哪个聊天”引导）
+        assert.equal(createdEvents.length, 1, '应恰好触发一次首次绑定回调');
+        assert.equal(createdEvents[0].p, 'p:555');
+        assert.equal(createdEvents[0].b.characterKey, 'av-amiya');
+        assert.ok(createdEvents[0].b.chatName, '应带新建的聊天名');
 
         // 绑定表
         const bind = ctx.settings.mapping['p:555'];
