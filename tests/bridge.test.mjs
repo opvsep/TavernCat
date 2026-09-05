@@ -49,7 +49,7 @@ class StubTavern {
         return this.greetings[characterKey] ?? null;
     }
 
-    getAvatarUrl() {
+    async getAvatarImage() {
         return null; // 测试默认无自定义头像；需要时用例内覆写
     }
 
@@ -403,6 +403,7 @@ test('无可用角色时不得沉默：向 QQ 回复原因说明', async () => {
         const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(t, /Tavern Cat/, '说明消息带 Tavern Cat 前缀');
         assert.match(t, /角色卡/, '说明应提示缺少角色卡');
+        assert.match(t, /\/指令/, '说明应引导使用 /指令');
     } finally {
         await teardown(ctx);
     }
@@ -478,12 +479,12 @@ test('角色有自定义头像：新接入时先发头像图片，再发开场�
         settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
         tavern: { greetings: { 'av-amiya': '你好呀，我是阿米娅~' } },
     });
-    ctx.tavern.getAvatarUrl = () => 'http://127.0.0.1:8000/img/avatars/av-amiya.png';
+    ctx.tavern.getAvatarImage = async () => ({ file: 'base64://aW1nZGF0YQ==' });
     try {
         ctx.server.pushPrivateMessage({ userId: 902, nickname: 'B', messageId: 9802, segments: [{ type: 'text', data: { text: '嗨' } }] });
         assert.ok(await waitSentCount(ctx.server, 4), '有头像时应发 图+开场白+回复+引导 共 4 条');
         assert.equal(ctx.server.sent[0].params.message[0].type, 'image', '第一条应是图片');
-        assert.equal(ctx.server.sent[0].params.message[0].data.file, 'http://127.0.0.1:8000/img/avatars/av-amiya.png');
+        assert.equal(ctx.server.sent[0].params.message[0].data.file, 'base64://aW1nZGF0YQ==', '图片数据直传（base64://）');
         const g = ctx.server.sent[1].params.message.map((m) => m.data.text ?? '').join('');
         assert.equal(g, '你好呀，我是阿米娅~', '图片之后紧跟开场白');
     } finally {

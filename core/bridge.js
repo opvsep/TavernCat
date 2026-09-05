@@ -233,9 +233,9 @@ export class NapcatBridge {
     async _sendNewChatGreeting(norm, characterKey) {
         // 0) 自定义头像：先发图片（默认/无头像不发送），失败不影响后续
         try {
-            const avatarUrl = this.host.getAvatarUrl?.(characterKey);
-            if (avatarUrl) {
-                const data = await this.bot.sendImage(norm.peerId, avatarUrl, norm.scope);
+            const avatar = await this.host.getAvatarImage?.(characterKey);
+            if (avatar?.file) {
+                const data = await this.bot.sendImage(norm.peerId, avatar.file, norm.scope);
                 if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
             }
         } catch (err) {
@@ -268,24 +268,26 @@ export class NapcatBridge {
         const hadBinding = !!this.settings.mapping[peerKey];
         let binding = this.settings.mapping[peerKey] ?? null;
 
-        // 1) 没有绑定 -> 用默认角色新建
+        // 1) 没有绑定 -> 用默认角色新建（先等酒馆角色列表就绪，避免页面刚开时的误判）
         if (!binding) {
+            await this.host.waitForCharacters?.();
             const chars = this.host.listCharacters?.() ?? [];
             const defaultKey = this.settings.defaultCharacterKey ?? chars[0]?.key;
             if (!defaultKey) {
                 this._log('error', `会话 ${peerKey} 无绑定且没有可用角色，请先在扩展面板设置默认角色`);
-                await this._safeReply(norm, '【Tavern Cat】暂时无法接入：酒馆里还没有可用的角色卡（或未设置「新会话默认角色」）。\n请先在酒馆添加/导入角色卡，再打开扩展「基础设置 → 新会话默认角色」选好，然后重新发送消息。');
+                await this._safeReply(norm, '【Tavern Cat】当前暂时无法接入：酒馆角色列表为空，或尚未设置「新会话默认角色」。\n· 发送 /指令 可查看全部可用指令；\n· 请先在酒馆添加/导入角色卡并刷新页面，再在扩展「基础设置 → 新会话默认角色」里选好角色，然后重新发送消息。');
                 return;
             }
             binding = { characterKey: defaultKey, chatName: null };
         }
 
         // 2) 确保酒馆里该会话的聊天被激活（必要时新建）
+        await this.host.waitForCharacters?.();
         const chars = this.host.listCharacters?.() ?? [];
         const charExists = chars.some((c) => c.key === binding.characterKey);
         if (!charExists) {
             this._log('error', `角色 ${binding.characterKey} 不存在，请重新绑定`);
-            await this._safeReply(norm, '【Tavern Cat】绑定的角色卡已不存在。请在扩展「进阶设置 → QQ 会话绑定」重新绑定，或用 /角色列表 查看可用角色后 /角色 <名称> 切换。');
+            await this._safeReply(norm, '【Tavern Cat】绑定的角色卡已不存在。\n· 发送 /指令 查看全部指令；\n· 在扩展「进阶设置 → QQ 会话绑定」重新绑定，或用 /角色列表 查看现有角色后 /角色 <名称> 切换。');
             return;
         }
 

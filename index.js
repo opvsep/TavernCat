@@ -192,13 +192,43 @@ function buildHost() {
             return { chatName, created };
         },
 
-        getAvatarUrl: (characterKey) => {
+        /**
+         * 等待酒馆角色列表就绪（页面刚开时 characters 可能还没加载完，避免误报“没有角色”）
+         */
+        waitForCharacters: async () => {
+            for (let i = 0; i < 20 && hub.characters.length === 0; i++) {
+                await new Promise((r) => setTimeout(r, 300));
+            }
+        },
+
+        /**
+         * 角色自定义头像：先尝试抓取为 base64 直传 QQ（不依赖 NapCat 回访酒馆）；
+         * 抓取失败时退回图片 URL（NapCat 自己下载）；无头像/默认头像返回 null。
+         */
+        getAvatarImage: async (characterKey) => {
             const idx = findCharIndex(characterKey);
             if (idx < 0) return null;
             const av = hub.characters[idx]?.avatar;
-            // 无头像 / 默认头像不发送
-            if (!av || av === 'none' || /^default/i.test(String(av))) return null;
-            return `${location.origin}/img/avatars/${encodeURIComponent(String(av))}`;
+            if (!av || av === 'none' || /^default/i.test(String(av))) return null; // 默认头像不发送
+            const url = `${location.origin}/img/avatars/${encodeURIComponent(String(av))}`;
+            try {
+                const res = await fetch(url, { cache: 'force-cache' });
+                if (!res.ok) return null; // 图片文件不存在 -> 不发
+                const ct = res.headers.get('content-type') ?? '';
+                if (!ct.startsWith('image/')) return null;
+                const blob = await res.blob();
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(String(reader.result ?? ''));
+                    reader.onerror = () => reject(new Error('FileReader 失败'));
+                    reader.readAsDataURL(blob);
+                });
+                const b64 = String(dataUrl).split(',')[1] ?? '';
+                if (!b64) return null;
+                return { file: `base64://${b64}` };
+            } catch {
+                return { file: url }; // fetch 受限（如跨源）时退回 URL，让 NapCat 下载
+            }
         },
 
         getGreeting: (characterKey) => {
@@ -597,7 +627,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.6';
+const VERSION = '0.5.7';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
