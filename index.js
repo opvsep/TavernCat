@@ -205,31 +205,41 @@ function buildHost() {
          * 角色自定义头像的发送形态（按优先级）：
          * 1) 配置了 charactersDir（NapCat 可见的酒馆角色卡目录）-> 返回本地绝对路径，NapCat 直接读文件发 QQ；
          * 2) 否则读取图片内容转 base64:// 直传（跨机也能用）；
-         * 3) 页面读图受限时退回图片 URL 让 NapCat 下载。
-         * 无头像/默认头像返回 null（不发送）。
+         * 3) 读取受限/失败时退回图片 URL 让 NapCat 下载。
+         * 只要角色有头像文件名（非空、非 none）就发送，不做任何“默认图”名称排除。
          */
         getAvatarImage: async (characterKey) => {
             const idx = findCharIndex(characterKey);
             if (idx < 0) return null;
             const av = hub.characters[idx]?.avatar;
-            // 只有“没有头像”或系统默认图 user-default.png 不发送，其余图片名一律直接发
-            if (!av || av === 'none' || av === 'user-default.png') return null;
+            if (!av || av === 'none') {
+                pushLog('info', `角色头像：跳过（无头像文件 avatar=${String(av ?? '')}）`);
+                return null;
+            }
             const fileName = String(av);
 
             // 1) 本地目录直读（用户配置过 charactersDir 时）
             const dir = String(config().charactersDir ?? '').trim();
             if (dir) {
-                const base = dir.replace(/[\\/]+$/, '');
-                return { file: `${base}/${fileName}` };
+                const local = `${dir.replace(/[\\/]+$/, '')}/${fileName}`;
+                pushLog('info', `角色头像：按本地路径发送 ${local}`);
+                return { file: local };
             }
 
-            // 2) base64 直传
+            // 2) 页面读取图片内容 -> base64 直传
             const url = `${location.origin}/img/avatars/${encodeURIComponent(fileName)}`;
             try {
                 const res = await fetch(url, { cache: 'force-cache' });
-                if (!res.ok) return null;
+                if (!res.ok) {
+                    // 3) 读不到也照发 URL，交给 NapCat 侧处理（尽量别静默不发）
+                    pushLog('warn', `头像 URL 状态 ${res.status}，退回 URL 发送：${url}`);
+                    return { file: url };
+                }
                 const ct = res.headers.get('content-type') ?? '';
-                if (!ct.startsWith('image/')) return null;
+                if (!ct.startsWith('image/')) {
+                    pushLog('warn', `头像响应类型异常（${ct}），退回 URL 发送：${url}`);
+                    return { file: url };
+                }
                 const blob = await res.blob();
                 const dataUrl = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
@@ -238,10 +248,14 @@ function buildHost() {
                     reader.readAsDataURL(blob);
                 });
                 const b64 = String(dataUrl).split(',')[1] ?? '';
-                if (!b64) return null;
+                if (!b64) {
+                    pushLog('warn', `头像转码为空，退回 URL 发送：${url}`);
+                    return { file: url };
+                }
+                pushLog('info', `角色头像：base64 直传（${Math.round(b64.length / 1024)}KB）`);
                 return { file: `base64://${b64}` };
-            } catch {
-                // 3) 退路：URL
+            } catch (err) {
+                pushLog('warn', `头像读取失败（${err?.message ?? err}），退回 URL 发送：${url}`);
                 return { file: url };
             }
         },
@@ -698,7 +712,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
