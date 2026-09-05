@@ -412,6 +412,11 @@ function renderStats() {
     if (el && bridge) {
         el.textContent = `队列：${bridge.queue.length}｜正在处理：${bridge.inTurn ? (bridge.turnPeerKey ?? '?') : '无'}`;
     }
+    const flow = advancedEl?.querySelector('#ncb_flow');
+    if (flow && bridge) {
+        const s = bridge.stats ?? { received: 0, processed: 0, errors: 0 };
+        flow.textContent = `收到 ${s.received} ｜ 处理 ${s.processed} ｜ 错误 ${s.errors}`;
+    }
 }
 
 // ---------------- 设置弹窗（基础 + 进阶 合并在 settings.html 一个弹窗内，顶部标签页切换） ----------------
@@ -579,7 +584,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.2';
+const VERSION = '0.5.3';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {

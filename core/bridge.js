@@ -102,7 +102,8 @@ export class NapcatBridge {
         this.turnPeerKey = null;
         this.recentSent = new Map(); // peerKey -> [{id, time}]
         this.onLog = null;        // (level, text) 供 UI 展示
-        this.onStats = null;      // ({queue, busy, inTurn, turnPeerKey})
+        this.onStats = null;      // ({queue, busy, inTurn, turnPeerKey, stats})
+        this.stats = { received: 0, processed: 0, errors: 0 }; // 消息流计数（供 UI 判断“有没有实例在执行”）
         this._recentCap = 300;
         this._recentTtlMs = 30 * 60 * 1000;
 
@@ -146,6 +147,10 @@ export class NapcatBridge {
 
     // ---------- 事件入口 ----------
     onOneBotEvent(ev) {
+        if (ev.post_type === 'message') {
+            this.stats.received += 1;
+            this._emitStats();
+        }
         if (ev.post_type !== 'message') return;
         const selfId = this.bot.selfId;
         const norm = normalizeMessageEvent(ev, selfId ?? ev.self_id);
@@ -191,6 +196,7 @@ export class NapcatBridge {
                 try {
                     await this._processOne(norm);
                 } catch (err) {
+                    this.stats.errors += 1;
                     this._log('error', `处理 ${norm.peerKey} 消息失败: ${err?.message ?? err}`);
                 }
                 this._emitStats();
@@ -203,6 +209,7 @@ export class NapcatBridge {
 
     // ---------- 单条消息 ----------
     async _processOne(norm) {
+        this.stats.processed += 1;
         const triggered = shouldTrigger(norm, {
             groupMode: this.settings.groupMode,
             recentSentIds: this._recentIds(norm.peerKey),
@@ -525,7 +532,13 @@ export class NapcatBridge {
     _emitStats() {
         if (this.onStats) {
             try {
-                this.onStats({ queue: this.queue.length, draining: this.draining, inTurn: this.inTurn, turnPeerKey: this.turnPeerKey });
+                this.onStats({
+                    queue: this.queue.length,
+                    draining: this.draining,
+                    inTurn: this.inTurn,
+                    turnPeerKey: this.turnPeerKey,
+                    stats: this.stats,
+                });
             } catch { /* 忽略 */ }
         }
     }
