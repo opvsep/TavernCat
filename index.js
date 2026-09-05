@@ -202,18 +202,31 @@ function buildHost() {
         },
 
         /**
-         * 角色自定义头像：先尝试抓取为 base64 直传 QQ（不依赖 NapCat 回访酒馆）；
-         * 抓取失败时退回图片 URL（NapCat 自己下载）；无头像/默认头像返回 null。
+         * 角色自定义头像的发送形态（按优先级）：
+         * 1) 配置了 charactersDir（NapCat 可见的酒馆角色卡目录）-> 返回本地绝对路径，NapCat 直接读文件发 QQ；
+         * 2) 否则读取图片内容转 base64:// 直传（跨机也能用）；
+         * 3) 页面读图受限时退回图片 URL 让 NapCat 下载。
+         * 无头像/默认头像返回 null（不发送）。
          */
         getAvatarImage: async (characterKey) => {
             const idx = findCharIndex(characterKey);
             if (idx < 0) return null;
             const av = hub.characters[idx]?.avatar;
             if (!av || av === 'none' || /^default/i.test(String(av))) return null; // 默认头像不发送
-            const url = `${location.origin}/img/avatars/${encodeURIComponent(String(av))}`;
+            const fileName = String(av);
+
+            // 1) 本地目录直读（用户配置过 charactersDir 时）
+            const dir = String(config().charactersDir ?? '').trim();
+            if (dir) {
+                const base = dir.replace(/[\\/]+$/, '');
+                return { file: `${base}/${fileName}` };
+            }
+
+            // 2) base64 直传
+            const url = `${location.origin}/img/avatars/${encodeURIComponent(fileName)}`;
             try {
                 const res = await fetch(url, { cache: 'force-cache' });
-                if (!res.ok) return null; // 图片文件不存在 -> 不发
+                if (!res.ok) return null;
                 const ct = res.headers.get('content-type') ?? '';
                 if (!ct.startsWith('image/')) return null;
                 const blob = await res.blob();
@@ -227,7 +240,8 @@ function buildHost() {
                 if (!b64) return null;
                 return { file: `base64://${b64}` };
             } catch {
-                return { file: url }; // fetch 受限（如跨源）时退回 URL，让 NapCat 下载
+                // 3) 退路：URL
+                return { file: url };
             }
         },
 
@@ -480,6 +494,7 @@ function refreshAdvancedPanel() {
     advancedEl.querySelector('#ncb_ownerIds').value = cfg.ownerIdsText ?? '';
     advancedEl.querySelector('#ncb_maxChars').value = cfg.maxReplyChars || 1800;
     advancedEl.querySelector('#ncb_firstNotice').checked = cfg.firstNotice !== false;
+    advancedEl.querySelector('#ncb_charactersDir').value = cfg.charactersDir ?? '';
     populateCharSelect(advancedEl.querySelector('#ncb_defaultChar'), cfg.defaultCharacterKey);
 
     refreshSessionTable();
@@ -588,6 +603,7 @@ function bindAdvancedEvents(root) {
         cfg.ownerIds = parseOwnerIds(cfg.ownerIdsText);
         cfg.maxReplyChars = Math.max(100, Number($('#ncb_maxChars').value) || 1800);
         cfg.firstNotice = $('#ncb_firstNotice').checked;
+        cfg.charactersDir = String($('#ncb_charactersDir').value ?? '').trim();
         cfg.defaultCharacterKey = $('#ncb_defaultChar').value;
         persist();
         toastr.success('设置已保存', APP_NAME);
@@ -627,7 +643,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.7';
+const VERSION = '0.5.8';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
