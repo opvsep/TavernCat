@@ -229,25 +229,14 @@ export class NapcatBridge {
         await this._runTurn(norm, text);
     }
 
-    /** 新角色/新会话建立后：先发角色头像（如有），再立刻把开场白注入聊天并发给 QQ */
+    /** 新角色/新会话建立后：先发角色头像（如搜得到），再立刻把开场白注入聊天并发给 QQ */
     async _sendNewChatGreeting(norm, characterKey) {
-        // 0) 自定义头像：先发图片（无头像不发送）；本地路径失败自动换在线方式，失败不影响后续
+        // 0) 头像：host 侧已按“本地目录+文件存在”判定，没有/搜不到时返回 null 不发
         try {
             const avatar = await this.host.getAvatarImage?.(characterKey);
             if (avatar?.file) {
-                try {
-                    const data = await this.bot.sendImage(norm.peerId, avatar.file, norm.scope);
-                    if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
-                } catch (err) {
-                    this._log('warn', `角色头像发送失败（${err?.message ?? err}），尝试在线方式兜底`);
-                    if (avatar.fallbackFileName && this.host.getAvatarOnline) {
-                        const alt = await this.host.getAvatarOnline(characterKey);
-                        if (alt?.file) {
-                            const data2 = await this.bot.sendImage(norm.peerId, alt.file, norm.scope);
-                            if (data2?.message_id) this._rememberSent(norm.peerKey, data2.message_id);
-                        }
-                    }
-                }
+                const data = await this.bot.sendImage(norm.peerId, avatar.file, norm.scope);
+                if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
             }
         } catch (err) {
             this._log('warn', `角色头像发送失败（跳过，不影响开场白）: ${err?.message ?? err}`);

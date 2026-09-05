@@ -130,40 +130,6 @@ function findCharIndex(characterKey) {
     return hub.characters.findIndex((c) => String(c.avatar) === characterKey);
 }
 
-/** 在线发送头像：页面读取图片内容转 base64 直传；读不到时退回 URL 交给 NapCat 下载 */
-async function sendAvatarOnline(fileName) {
-    const url = `${location.origin}/img/avatars/${encodeURIComponent(fileName)}`;
-    try {
-        const res = await fetch(url, { cache: 'force-cache' });
-        if (!res.ok) {
-            pushLog('warn', `头像 URL 状态 ${res.status}，退回 URL 发送：${url}`);
-            return { file: url };
-        }
-        const ct = res.headers.get('content-type') ?? '';
-        if (!ct.startsWith('image/')) {
-            pushLog('warn', `头像响应类型异常（${ct}），退回 URL 发送：${url}`);
-            return { file: url };
-        }
-        const blob = await res.blob();
-        const dataUrl = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result ?? ''));
-            reader.onerror = () => reject(new Error('FileReader 失败'));
-            reader.readAsDataURL(blob);
-        });
-        const b64 = String(dataUrl).split(',')[1] ?? '';
-        if (!b64) {
-            pushLog('warn', `头像转码为空，退回 URL 发送：${url}`);
-            return { file: url };
-        }
-        pushLog('info', `角色头像：base64 直传（${Math.round(b64.length / 1024)}KB）`);
-        return { file: `base64://${b64}` };
-    } catch (err) {
-        pushLog('warn', `头像读取失败（${err?.message ?? err}），退回 URL 发送：${url}`);
-        return { file: url };
-    }
-}
-
 function buildHost() {
     return {
         isReady: () => hub.characters.length > 0,
@@ -236,11 +202,10 @@ function buildHost() {
         },
 
         /**
-         * 角色自定义头像的发送形态（按优先级）：
-         * 1) 配置了 charactersDir（NapCat 可见的酒馆角色卡目录）-> 返回本地绝对路径，NapCat 直接读文件发 QQ；
-         * 2) 否则读取图片内容转 base64:// 直传（跨机也能用）；
-         * 3) 读取受限/失败时退回图片 URL 让 NapCat 下载。
-         * 只要角色有头像文件名（非空、非 none）就发送，不做任何“默认图”名称排除。
+         * 角色头像：只走“本地目录”方式。
+         * 1) 未配置 charactersDir -> 不发送（记日志）；
+         * 2) 先在酒馆侧确认该图片文件存在（NapCat 与酒馆同机时一致）——搜不到就不发；
+         * 3) 找到了就按 `${目录}/${头像文件名}` 直接发给 NapCat 读文件发送，不管图片格式。
          */
         getAvatarImage: async (characterKey) => {
             const idx = findCharIndex(characterKey);
@@ -252,25 +217,29 @@ function buildHost() {
             }
             const fileName = String(av);
 
-            // 1) 用户配置了本地目录 -> 用本地路径（NapCat 直读）；失败时 bridge 会自动换在线方式
             const dir = String(config().charactersDir ?? '').trim();
-            if (dir) {
-                const local = `${dir.replace(/[\\/]+$/, '')}/${fileName}`;
-                pushLog('info', `角色头像：按本地路径发送 ${local}`);
-                return { file: local, fallbackFileName: fileName };
+            if (!dir) {
+                pushLog('warn', '角色头像：未配置「角色头像本地目录」，不发送（可在进阶设置中填写酒馆 characters 文件夹路径）');
+                return null;
             }
 
-            // 2) 未配置目录 -> 在线方式（base64 直传 / URL）
-            return sendAvatarOnline(fileName);
-        },
+            // 预检文件是否存在（通过酒馆图片服务探测；同机时 NapCat 能看到同一文件）
+            const probeUrl = `${location.origin}/img/avatars/${encodeURIComponent(fileName)}`;
+            try {
+                const res = await fetch(probeUrl, { cache: 'force-cache' });
+                if (!res.ok) {
+                    pushLog('info', `角色头像：未搜到图片文件 ${fileName}（HTTP ${res.status}），不发送`);
+                    return null;
+                }
+            } catch (err) {
+                pushLog('warn', `角色头像：文件探测失败（${err?.message ?? err}），按“未搜到”处理，不发送`);
+                return null;
+            }
 
-        /** 在线方式（忽略本地目录配置）：本地路径发送失败时由 bridge 调用此兜底 */
-        getAvatarOnline: async (characterKey) => {
-            const idx = findCharIndex(characterKey);
-            if (idx < 0) return null;
-            const av = hub.characters[idx]?.avatar;
-            if (!av || av === 'none') return null;
-            return sendAvatarOnline(String(av));
+            // 名字对上了 -> 直接发本地路径（NapCat 读文件上传，不管格式）
+            const local = `${dir.replace(/[\\/]+$/, '')}/${fileName}`;
+            pushLog('info', `角色头像：搜到 ${fileName}，按本地路径发送 ${local}`);
+            return { file: local };
         },
 
         getGreeting: (characterKey) => {
@@ -725,7 +694,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.2';
+const VERSION = '0.6.3';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
