@@ -258,6 +258,7 @@ test('新会话自动绑定默认角色并放开场白；首次接入发引导�
         const notice = ctx.server.sent[2].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(notice, /Tavern Cat/, '第三条应为接入引导消息');
         assert.match(notice, /阿米娅/, '引导消息应带角色名');
+        assert.match(notice, /\/指令/, '引导消息应提示使用 /指令');
 
         // 绑定表
         const bind = ctx.settings.mapping['p:555'];
@@ -411,6 +412,44 @@ test('/引导 指令可手动触发接入引导（未绑定场景）', async () 
         const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(t, /Tavern Cat/);
         assert.match(t, /还没有绑定/);
+    } finally {
+        await teardown(ctx);
+    }
+});
+
+test('/指令 展示全部指令；/解绑 恢复初始状态并支持重新接入', async () => {
+    const ctx = await setup({
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        tavern: { greetings: { 'av-amiya': '你好呀，{{user}}，我是阿米娅~' } },
+    });
+    try {
+        // 首次接入：开场白+回复+引导 = 3 条
+        ctx.server.pushPrivateMessage({ userId: 888, nickname: '新客', messageId: 9701, segments: [{ type: 'text', data: { text: '在吗' } }] });
+        assert.ok(await waitSentCount(ctx.server, 3), '首聊应发 3 条');
+        const notice = ctx.server.sent[2].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(notice, /\/指令/, '首次引导应提示 /指令');
+
+        // /指令 全列表
+        ctx.server.pushPrivateMessage({ userId: 888, nickname: '新客', messageId: 9702, segments: [{ type: 'text', data: { text: '/指令' } }] });
+        assert.ok(await waitSentCount(ctx.server, 4), '/指令 应回复');
+        const help = ctx.server.sent[3].params.message.map((m) => m.data.text ?? '').join('');
+        for (const cmd of ['/指令', '/引导', '/角色', '/重置', '/解绑', '/状态', '/关闭', '/开启']) {
+            assert.ok(help.includes(cmd), `指令列表应包含 ${cmd}`);
+        }
+
+        // /解绑：回到初始状态
+        ctx.server.pushPrivateMessage({ userId: 888, nickname: '新客', messageId: 9703, segments: [{ type: 'text', data: { text: '/解绑' } }] });
+        assert.ok(await waitSentCount(ctx.server, 5), '/解绑 应回复');
+        const unbind = ctx.server.sent[4].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(unbind, /已解绑/);
+        assert.equal(ctx.settings.mapping['p:888'], undefined, '解绑后 mapping 应删除');
+
+        // 再次发言 -> 重新按首次接入处理
+        ctx.server.pushPrivateMessage({ userId: 888, nickname: '新客', messageId: 9704, segments: [{ type: 'text', data: { text: '再聊聊' } }] });
+        assert.ok(await waitSentCount(ctx.server, 8), '解绑后再次发言应重新接入（3 条）');
+        assert.ok(ctx.settings.mapping['p:888'], '重新接入后 mapping 重建');
+        const notice2 = ctx.server.sent[7].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(notice2, /\/指令/, '重新接入仍发带 /指令 的引导');
     } finally {
         await teardown(ctx);
     }
