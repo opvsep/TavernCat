@@ -4,8 +4,7 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
-    min-width: 560px;
-    max-width: 760px;
+    width: min(680px, 92vw);
     text-align: left;
     font-size: 13px;
 }
@@ -166,26 +165,63 @@
     height: 24px;
 }
 
-/* 魔法棒菜单项状态点 */
-.tc-menu-dot {
+/* 魔法棒菜单：第三方扩展图标按钮（与内置扩展风格一致） */
+#tavern_cat_wand_container {
+    display: inline-flex;
+    align-items: center;
+    margin: 0 2px;
+}
+
+.tc-wand-btn {
+    position: relative;
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 2px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.tc-wand-btn:hover {
+    background: rgba(128, 128, 128, 0.18);
+}
+
+.tc-wand-logo {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    object-fit: contain;
+}
+
+.tc-wand-btn .extensionsMenuExtensionButton {
+    font-size: 17px;
+    margin: 0;
+}
+
+/* 右下角连接状态点 */
+.tc-wand-dot {
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    margin-left: auto;
-    flex-shrink: 0;
+    border: 1px solid var(--SmartThemeBlurTintColor, #111);
+    box-sizing: border-box;
 }
 
-.tc-menu-dot.tc-ok {
+.tc-wand-dot.tc-ok {
     background: #2ecc71;
-    box-shadow: 0 0 5px #2ecc71;
 }
 
-.tc-menu-dot.tc-busy {
+.tc-wand-dot.tc-busy {
     background: #f1c40f;
-    box-shadow: 0 0 5px #f1c40f;
     animation: tc-blink 1s infinite;
 }
 
-.tc-menu-dot.tc-off {
+.tc-wand-dot.tc-off {
     background: #95a5a6;
 }

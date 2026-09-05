@@ -280,9 +280,10 @@ function syncStatusUi() {
     const s = { ...lastStatus, reason: lastStatus.reason };
     const connected = !!s.connected;
 
-    // 魔法棒菜单圆点
+    // 魔法棒图标按钮的角标状态点
+    const dotState = connected ? 'tc-ok' : (s.reason === 'reconnecting' ? 'tc-busy' : 'tc-off');
     for (const dot of menuDots) {
-        dot.className = 'tc-menu-dot ' + (connected ? 'tc-ok' : (s.reason === 'reconnecting' ? 'tc-busy' : 'tc-off'));
+        dot.className = `tc-wand-dot ${dotState}`;
     }
     // 进阶面板
     if (advancedEl) {
@@ -496,7 +497,7 @@ function openBasicPanel() {
     }
 
     syncStatusUi();
-    callGenericPopup(basicEl, POPUP_TYPE.TEXT, '', { okButton: '关闭', wide: false }).finally(() => {
+    callGenericPopup(basicEl, POPUP_TYPE.TEXT, '', { okButton: '关闭', wide: true }).finally(() => {
         basicEl = null;
     });
 }
@@ -614,14 +615,17 @@ async function openAdvancedPanel() {
     }
 }
 
-// ---------------- 魔法棒菜单 ----------------
+// ---------------- 魔法棒菜单（与内置扩展一致的图标按钮 + 右下角状态点） ----------------
 
-function makeMenuItem(label, onClick) {
-    const item = document.createElement('div');
-    item.className = 'list-group-item flex-container flexGap5';
-    item.innerHTML = `<img class="tc-logo tc-menu-logo" src="${LOGO_URL}" alt="NapCat" /><span>${label}</span><span class="tc-menu-dot tc-off"></span>`;
-    item.addEventListener('click', onClick);
-    return item;
+const WAND_CONTAINER_ID = 'tavern_cat_wand_container';
+
+function makeWandButton({ html, title, onClick }) {
+    const btn = document.createElement('div');
+    btn.className = 'tc-wand-btn';
+    btn.title = title;
+    btn.innerHTML = html;
+    btn.addEventListener('click', onClick);
+    return btn;
 }
 
 function mountMenu() {
@@ -630,11 +634,28 @@ function mountMenu() {
         setTimeout(mountMenu, 1000);
         return;
     }
-    const basic = makeMenuItem(`${APP_NAME} · 基础设置`, () => openBasicPanel());
-    const adv = makeMenuItem(`${APP_NAME} · 进阶设置`, () => openAdvancedPanel());
-    menuDots.push(basic.querySelector('.tc-menu-dot'), adv.querySelector('.tc-menu-dot'));
-    menu.appendChild(basic);
-    menu.appendChild(adv);
+    let container = document.getElementById(WAND_CONTAINER_ID);
+    if (!container) {
+        container = document.createElement('div');
+        container.id = WAND_CONTAINER_ID;
+        container.className = 'extension_container';
+        menu.appendChild(container);
+    } else {
+        container.innerHTML = ''; // 幂等：重复挂载时先清空
+    }
+    const basic = makeWandButton({
+        html: `<img class="tc-wand-logo" src="${LOGO_URL}" alt="" /><span class="tc-wand-dot tc-off"></span>`,
+        title: `${APP_NAME} · 基础设置（连接 / 常用配置）`,
+        onClick: () => openBasicPanel(),
+    });
+    const adv = makeWandButton({
+        html: `<div class="fa-solid fa-sliders extensionsMenuExtensionButton"></div><span class="tc-wand-dot tc-off"></span>`,
+        title: `${APP_NAME} · 进阶设置（会话绑定 / 白名单 / 日志）`,
+        onClick: () => openAdvancedPanel(),
+    });
+    menuDots.push(basic.querySelector('.tc-wand-dot'), adv.querySelector('.tc-wand-dot'));
+    container.appendChild(basic);
+    container.appendChild(adv);
     syncStatusUi();
 }
 
