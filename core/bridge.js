@@ -229,6 +229,28 @@ export class NapcatBridge {
         await this._runTurn(norm, text);
     }
 
+    /** 新角色/新会话建立后：立刻把该角色的开场白注入聊天并发给 QQ（受 greetNewChat 开关控制） */
+    async _sendNewChatGreeting(norm, characterKey) {
+        if (this.settings.greetNewChat === false) {
+            this._log('info', `已关闭“新会话开场白”，跳过 ${characterKey}`);
+            return;
+        }
+        try {
+            const rawGreeting = this.host.getGreeting?.(characterKey) ?? '';
+            if (!String(rawGreeting).trim()) {
+                this._log('info', `角色 ${this._charName(characterKey)} 没有开场白，跳过`);
+                return;
+            }
+            const greeting = String(rawGreeting)
+                .replaceAll('{{char}}', this._charName(characterKey))
+                .replaceAll('{{user}}', norm.senderName);
+            await this.host.injectAssistantMessage(greeting);
+            await this._sendToPeer(norm, greeting, { quote: false });
+        } catch (err) {
+            this._log('warn', `开场白发送失败: ${err?.message ?? err}`);
+        }
+    }
+
     /** 一次完整回合：定位/创建会话 -> 注入用户消息 -> 生成 -> 回传 */
     async _runTurn(norm, text) {
         const peerKey = norm.peerKey;
@@ -270,20 +292,9 @@ export class NapcatBridge {
         this.settings.bindings[peerKey][binding.characterKey] = chatName;
         this.host.persist();
 
-        // 3) 新建会话 -> 先放开场白并回传
-        if (switched.created && this.settings.greetNewChat) {
-            try {
-                const rawGreeting = this.host.getGreeting?.(binding.characterKey) ?? '';
-                if (rawGreeting.trim()) {
-                    const greeting = rawGreeting
-                        .replaceAll('{{char}}', this._charName(binding.characterKey))
-                        .replaceAll('{{user}}', norm.senderName);
-                    await this.host.injectAssistantMessage(greeting);
-                    await this._sendToPeer(norm, greeting, { quote: false });
-                }
-            } catch (err) {
-                this._log('warn', `开场白注入失败: ${err?.message ?? err}`);
-            }
+        // 3) 新建会话 -> 立刻把角色开场白发出来（注入聊天 + 回传 QQ）
+        if (switched.created) {
+            await this._sendNewChatGreeting(norm, binding.characterKey);
         }
 
         // 4) 注入 QQ 消息（打 QQ 来源标记，防止回推死循环）
@@ -442,6 +453,9 @@ export class NapcatBridge {
                     this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
                     this.settings.bindings[peerKey][target.key] = binding.chatName;
                     this.host.persist();
+                    if (switched.created) {
+                        await this._sendNewChatGreeting(norm, target.key); // 新对话：立刻放开场白
+                    }
                     const note = oldBinding?.characterKey === target.key ? '' : `（${switched.created ? '新对话' : '继续旧对话'}）`;
                     reply = `已切换到角色「${target.name}」${note}`;
                 } catch (err) {
@@ -463,6 +477,9 @@ export class NapcatBridge {
                     this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
                     this.settings.bindings[peerKey][binding.characterKey] = switched.chatName;
                     this.host.persist();
+                    if (switched.created) {
+                        await this._sendNewChatGreeting(norm, binding.characterKey); // 重开后也放开场白
+                    }
                     reply = '已开新对话，上下文已清空。';
                 } catch (err) {
                     reply = `重置失败：${err?.message ?? err}`;

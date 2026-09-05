@@ -265,23 +265,25 @@ test('新会话自动绑定默认角色并放开场白；首次接入发引导�
         assert.equal(bind.characterKey, 'av-amiya');
         assert.ok(bind.chatName);
 
-        // 群里发指令切换角色（需 @ 触发）
+        // 群里发指令切换角色（需 @ 触发）：新对话应立刻发该角色的开场白
         ctx.server.pushGroupMessage({
             groupId: 999, userId: 555, nickname: '新朋友', messageId: 9202,
             segments: [{ type: 'at', data: { qq: String(ctx.server.selfId) } }, { type: 'text', data: { text: '/角色 2' } }],
         });
-        assert.ok(await waitSentCount(ctx.server, 4));
-        const cmdReply = ctx.server.sent[3];
+        assert.ok(await waitSentCount(ctx.server, 5), '切角色应发 开场白+切换确认 两条');
+        const wGreeting = ctx.server.sent[3].params.message.map((m) => m.data.text ?? '').join('');
+        assert.equal(wGreeting, '哼哼，我是W。', '新角色开场白应立刻发到 QQ');
+        const cmdReply = ctx.server.sent[4];
         const cmdText = cmdReply.params.message.map((m) => m.data.text ?? '').join('');
         assert.match(cmdText, /W/);
         assert.equal(ctx.settings.mapping['g:999'].characterKey, 'av-w');
         assert.equal(ctx.settings.mapping['g:999'].chatName, ctx.tavern.current.chatName, '应绑定到新建的 W 聊天');
-        assert.equal(ctx.tavern.history[`av-w|${ctx.tavern.current.chatName}`].length, 0, '新角色会话应为空');
+        assert.equal(ctx.tavern.history[`av-w|${ctx.tavern.current.chatName}`].length, 1, '开场白应写入新聊天历史');
 
         // /状态
         ctx.server.pushPrivateMessage({ userId: 555, nickname: '新朋友', messageId: 9203, segments: [{ type: 'text', data: { text: '/状态' } }] });
-        assert.ok(await waitSentCount(ctx.server, 5));
-        const st = ctx.server.sent[4].params.message.map((m) => m.data.text ?? '').join('');
+        assert.ok(await waitSentCount(ctx.server, 6));
+        const st = ctx.server.sent[5].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(st, /阿米娅/);
     } finally {
         await teardown(ctx);

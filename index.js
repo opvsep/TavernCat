@@ -196,7 +196,11 @@ function buildHost() {
             const idx = findCharIndex(characterKey);
             if (idx < 0) return '';
             const c = hub.characters[idx];
-            return c?.first_mes ?? c?.data?.first_mes ?? '';
+            const alternates = c?.data?.alternate_greetings;
+            return c?.first_mes
+                ?? c?.data?.first_mes
+                ?? (Array.isArray(alternates) && alternates.length > 0 ? alternates[0] : '')
+                ?? '';
         },
 
         injectUserMessage: async (text, meta = {}) => {
@@ -584,7 +588,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.3';
+const VERSION = '0.5.4';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
