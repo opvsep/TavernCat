@@ -214,6 +214,10 @@ function buildHost() {
                     created = true;
                 }
             } else if (hub.getCurrentChatId() !== chatName) {
+                // 先确认聊天文件真的还在（可能已被删除），避免把会话绑到幽灵文件
+                if (!(await this.chatFileExists(characterKey, chatName))) {
+                    throw new Error(`聊天文件已不存在：${chatName}`);
+                }
                 pushLog('info', `[trace] openCharacterChat -> ${chatName}`);
                 await hub.openCharacterChat(chatName);
                 if (hub.getCurrentChatId() !== chatName) throw new Error(`打开聊天失败: ${chatName}`);
@@ -225,6 +229,30 @@ function buildHost() {
                 await hub.saveChatConditional();
             }
             return { chatName, created };
+        },
+
+        /**
+         * 聊天文件是否存在（按角色全量聊天列表检测）；无法确认时返回 true 不拦截
+         */
+        chatFileExists: async (characterKey, chatName) => {
+            if (!characterKey || !chatName) return false;
+            try {
+                const headers = hub?.getRequestHeaders ? hub.getRequestHeaders() : {};
+                const res = await fetch('/api/characters/chats', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ avatar_url: characterKey }),
+                    cache: 'no-cache',
+                });
+                if (!res.ok) return true;
+                const data = await res.json();
+                const names = data && typeof data === 'object'
+                    ? Object.values(data).map((e) => String(e?.file_name ?? e?.file_id ?? ''))
+                    : [];
+                return names.some((n) => n === chatName || n === `${chatName}.jsonl`);
+            } catch {
+                return true;
+            }
         },
 
         /**
@@ -670,7 +698,7 @@ function refreshAdvancedPanel() {
     advancedEl.querySelector('#ncb_greetNewChat').checked = cfg.greetNewChat !== false;
     advancedEl.querySelector('#ncb_ownerIds').value = cfg.ownerIdsText ?? '';
     advancedEl.querySelector('#ncb_maxChars').value = cfg.maxReplyChars || 1800;
-    advancedEl.querySelector('#ncb_firstNotice').checked = cfg.firstNotice !== false;
+    advancedEl.querySelector('#ncb_firstNotice').checked = !!cfg.firstNotice;
     advancedEl.querySelector('#ncb_charactersDir').value = cfg.charactersDir ?? '';
     populateCharSelect(advancedEl.querySelector('#ncb_defaultChar'), cfg.defaultCharacterKey);
 
@@ -827,7 +855,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.6';
+const VERSION = '0.8.0';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {

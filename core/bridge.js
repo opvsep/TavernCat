@@ -38,7 +38,7 @@ export const DEFAULT_SETTINGS = {
     replyQuote: true,
     greetNewChat: true,
     maxReplyChars: 1800,
-    firstNotice: true, // 会话首次接入时，在 QQ 里发一条引导消息
+    firstNotice: false, // 首次接入的【Tavern Cat】引导长文：默认关闭（接入即回复，不再额外打扰）
 };
 
 /** 把长文本切成 <=maxChars 的块。按“行”打包，保证 chunks.join('\n') === 原文（超长单行按字数硬切）。 */
@@ -346,6 +346,16 @@ export class NapcatBridge {
             switched = await this.host.switchTo(binding.characterKey, binding.chatName ?? null, peerKey);
         } catch (err) {
             this._log('error', `切换会话失败: ${err?.message ?? err}`);
+            const msg = String(err?.message ?? err);
+            if (msg.includes('已不存在')) {
+                // 绑定的聊天文件被删：清除绑定，让会话回到可重新接入的状态
+                delete this.settings.mapping[peerKey];
+                if (this.settings.bindings?.[peerKey]) delete this.settings.bindings[peerKey];
+                this.host.persist();
+                await this._safeReply(norm, '原聊天文件已被删除：本会话已重置。\n重新发送一条消息即可按默认角色开启新对话（或先发 /角色列表 /历史 选择）。');
+            } else {
+                await this._safeReply(norm, `接入失败：${msg.slice(0, 100)}\n请稍后再发一次；或发 /引导 查看当前状态。`);
+            }
             return;
         }
         const chatName = switched.chatName;
@@ -508,9 +518,17 @@ export class NapcatBridge {
                 break;
             case '/引导': {
                 const b = this.settings.mapping[norm.peerKey];
-                reply = b
-                    ? `【Tavern Cat】本会话当前绑定：角色「${this._charName(b.characterKey)}」/ 聊天 ${b.chatName ?? '(未建)'}\n· 换角色：发 /角色 <名称>；\n· 想接着酒馆里已有的聊天继续：在扩展「进阶设置 → QQ 会话绑定」把本会话绑到那个聊天；\n· 全部指令：/指令`
-                    : '【Tavern Cat】本会话还没有绑定角色。\n· 发 /角色列表 查看可用角色，用 /角色 <名称> 绑定；\n· 或直接发普通消息，将自动使用默认角色接入。';
+                if (b) {
+                    reply = `【Tavern Cat】本会话当前绑定：角色「${this._charName(b.characterKey)}」/ 聊天 ${b.chatName ?? '(未建)'}\n· 换角色：发 /角色 <名称>；\n· 看历史聊天：/历史（仅白名单）；\n· 全部指令：/指令`;
+                } else {
+                    const chars = this.host.listCharacters?.() ?? [];
+                    const defKey = this.settings.defaultCharacterKey && chars.some((c) => c.key === this.settings.defaultCharacterKey)
+                        ? this.settings.defaultCharacterKey
+                        : (chars[0]?.key ?? null);
+                    reply = defKey
+                        ? `本会话还没有绑定聊天。直接发任意消息，将自动按默认角色「${this._charName(defKey)}」开新对话接入。\n· /指令 查看全部指令`
+                        : '本会话还没有绑定聊天，且酒馆里暂无可用角色。请先在酒馆添加角色卡，再发任意消息即可接入。\n· /指令 查看全部指令';
+                }
                 break;
             }
             case '/角色列表': {
@@ -552,7 +570,10 @@ export class NapcatBridge {
                     const note = oldBinding?.characterKey === target.key ? '' : `（${switched.created ? '新对话' : '继续旧对话'}）`;
                     reply = `已切换到角色「${target.name}」${note}`;
                 } catch (err) {
-                    reply = `切换失败：${err?.message ?? err}`;
+                    const msg = String(err?.message ?? err);
+                    reply = msg.includes('已不存在')
+                        ? `切换失败：该聊天文件已不存在。可用 /历史 重新选择，或发 /新对话 开新对话。`
+                        : `切换失败：${msg}。请稍后再试。`;
                 }
                 break;
             }
@@ -639,7 +660,10 @@ export class NapcatBridge {
                         this.host.persist();
                         reply = `已切换到聊天「${this._charName(target.characterKey)}」/ ${chatName}（原对话继续）`;
                     } catch (err) {
-                        reply = `切换失败：${err?.message ?? err}（该聊天可能已被删除）`;
+                        const msg = String(err?.message ?? err);
+                        reply = msg.includes('已不存在')
+                            ? '切换失败：该聊天文件已不存在。可用 /历史 重新选择，或发 /新对话 开新对话。'
+                            : `切换失败：${msg}（请稍后再试）`;
                     }
                 }
                 break;
@@ -650,7 +674,7 @@ export class NapcatBridge {
                 const enabled = this.isPeerEnabled(peerKey) ? '开启' : '关闭';
                 reply = binding
                     ? `本会话：角色「${this._charName(binding.characterKey)}」 / 聊天 ${binding.chatName ?? '(未创建)'}\n状态：${enabled}`
-                    : `本会话尚未绑定角色（状态：${enabled}）\n可用 /角色列表 查看角色，/角色 <名称> 绑定。`;
+                    : `本会话尚未绑定聊天（状态：${enabled}）。\n直接发任意消息即按默认角色接入；也可 /历史 选择已有聊天。`;
                 break;
             }
             case '/关闭':

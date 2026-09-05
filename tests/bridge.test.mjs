@@ -256,7 +256,7 @@ test('群聊模式 all：每条消息都回；at_only：仅 @ 回', async () => 
 
 test('新会话自动绑定默认角色并放开场白；首次接入发引导消息；/角色 切换绑定；/状态 查询', async () => {
     const ctx = await setup({
-        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [], firstNotice: true },
         tavern: { greetings: { 'av-amiya': '你好呀，{{user}}，我是阿米娅~', 'av-w': '哼哼，我是W。' } },
     });
     try {
@@ -422,8 +422,9 @@ test('/引导 指令可手动触发接入引导（未绑定场景）', async () 
         ctx.server.pushPrivateMessage({ userId: 777, nickname: '主人', messageId: 9602, segments: [{ type: 'text', data: { text: '/引导' } }] });
         assert.ok(await waitSentCount(ctx.server, 1), '/引导 应回复');
         const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
-        assert.match(t, /Tavern Cat/);
-        assert.match(t, /还没有绑定/);
+        assert.match(t, /还没有绑定聊天/, '/引导 应说明未绑定');
+        assert.match(t, /阿米娅/, '未绑定时应提示将使用默认角色');
+        assert.match(t, /\/指令/);
     } finally {
         await teardown(ctx);
     }
@@ -431,7 +432,7 @@ test('/引导 指令可手动触发接入引导（未绑定场景）', async () 
 
 test('/指令 展示全部指令；/解绑 恢复初始状态并支持重新接入', async () => {
     const ctx = await setup({
-        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [], firstNotice: true },
         tavern: { greetings: { 'av-amiya': '你好呀，{{user}}，我是阿米娅~' } },
     });
     try {
@@ -469,7 +470,7 @@ test('/指令 展示全部指令；/解绑 恢复初始状态并支持重新接�
 
 test('角色无自定义头像（默认头像）：新接入时不发图片，只发开场白', async () => {
     const ctx = await setup({
-        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [], firstNotice: true },
         tavern: { greetings: { 'av-amiya': '你好呀，我是阿米娅~' } },
     });
     try {
@@ -483,7 +484,7 @@ test('角色无自定义头像（默认头像）：新接入时不发图片，�
 
 test('角色有自定义头像：新接入时先发头像图片，再发开场白', async () => {
     const ctx = await setup({
-        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [], firstNotice: true },
         tavern: { greetings: { 'av-amiya': '你好呀，我是阿米娅~' } },
     });
     ctx.tavern.getAvatarImage = async () => ({ file: 'base64://aW1nZGF0YQ==' });
