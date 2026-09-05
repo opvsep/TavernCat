@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "Tavern Cat contributors",
-    "version": "0.3.2",
+    "version": "0.4.0",
     "homePage": "",
     "hooks": {
         "activate": "init"

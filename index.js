@@ -458,9 +458,10 @@ function refreshSessionTable() {
             <td>${escapeHtml(names.get(binding.characterKey) ?? binding.characterKey)}</td>
             <td title="${escapeHtml(binding.chatName ?? '')}">${escapeHtml(String(binding.chatName ?? '').slice(0, 18))}</td>
             <td class="ncb-ops">
-                <button data-act="on" class="menu_button ncb-small" ${enabled ? 'disabled' : ''}>开启</button>
-                <button data-act="off" class="menu_button ncb-small" ${!enabled ? 'disabled' : ''}>暂停</button>
-                <button data-act="unbind" class="menu_button ncb-small ncb-danger">解绑</button>
+                <button data-act="on" class="menu_button tc-small" ${enabled ? 'disabled' : ''}>开启</button>
+                <button data-act="off" class="menu_button tc-small" ${!enabled ? 'disabled' : ''}>暂停</button>
+                <button data-act="bindcurrent" class="menu_button tc-small" title="把酒馆当前打开的角色聊天绑定到这个 QQ 会话（续接原对话）">绑当前</button>
+                <button data-act="unbind" class="menu_button tc-small tc-danger" title="解除绑定">解绑</button>
             </td>`;
         tbody.appendChild(tr);
     }
@@ -469,6 +470,42 @@ function refreshSessionTable() {
         tr.innerHTML = '<td colspan="4" class="ncb-empty">还没有绑定任何 QQ 会话：QQ 里第一次 @机器人 / 私聊 会自动创建</td>';
         tbody.appendChild(tr);
     }
+}
+
+/**
+ * 把酒馆当前打开的角色聊天，改绑给指定的 QQ 会话（用于“用 QQ 续接原有聊天”）。
+ * 之后的 QQ 消息都会进入这个聊天，延续已有历史。
+ */
+function bindCurrentChatToPeer(peerKey) {
+    const ctx = getContext();
+    const charId = ctx.characterId;
+    if (charId === undefined || charId === null || charId === '') {
+        notify('error', '请先在酒馆里打开你想要绑定的角色和聊天，再点「绑当前」');
+        return;
+    }
+    const charIdx = Number(charId);
+    const character = hub.characters[charIdx];
+    const characterKey = character ? String(character.avatar) : null;
+    const chatName = hub.getCurrentChatId();
+    if (!characterKey || !chatName) {
+        notify('error', '获取当前角色/聊天失败，请先正常打开一个聊天');
+        return;
+    }
+    const cfg = config();
+    // 若该聊天文件正被别的 QQ 会话占用，提示用户（允许覆盖，但提醒双向转发只认一个绑定）
+    const conflicted = Object.entries(cfg.mapping ?? {}).find(
+        ([pk, b]) => pk !== peerKey && b.characterKey === characterKey && b.chatName === chatName,
+    );
+    cfg.mapping[peerKey] = { characterKey, chatName };
+    cfg.bindings[peerKey] = cfg.bindings[peerKey] ?? {};
+    cfg.bindings[peerKey][characterKey] = chatName;
+    if (cfg.peerEnabled[peerKey] === false) cfg.peerEnabled[peerKey] = true;
+    hub.chat_metadata.qq = { peerKey };
+    hub.saveChatConditional().then(() => persist());
+    const name = character?.name ?? characterKey;
+    const conflictTip = conflicted ? `（注意：该聊天之前绑在 ${conflicted[0]}，已改绑）` : '';
+    toastr.success(`已绑定：${peerKey} ↔「${name}」/ ${chatName} ${conflictTip}`, APP_NAME);
+    refreshSessionTable();
 }
 
 function bindAdvancedEvents(root) {
@@ -515,6 +552,7 @@ function bindAdvancedEvents(root) {
         const act = btn.dataset.act;
         if (act === 'on') bridge.setPeerEnabled(peerKey, true);
         if (act === 'off') bridge.setPeerEnabled(peerKey, false);
+        if (act === 'bindcurrent') { bindCurrentChatToPeer(peerKey); return; }
         if (act === 'unbind') bridge.unbindPeer(peerKey);
         refreshSessionTable();
     });
@@ -528,7 +566,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.3.2';
+const VERSION = '0.4.0';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
