@@ -302,46 +302,45 @@ function buildHost() {
             }
         },
 
-        /** 拉取“整个程序”的聊天记录（跨角色，最近优先），供 /历史 选择 */
-        fetchChatHistory: async (max = 40) => {
+        /** 拉取“整个程序”的聊天记录：遍历所有角色拉全量聊天列表（不受“每角色仅最新”限制） */
+        fetchChatHistory: async (max = 60) => {
             try {
                 const headers = hub?.getRequestHeaders ? hub.getRequestHeaders() : {};
-                const res = await fetch('/api/chats/recent', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ max, pinned: [] }),
-                    cache: 'no-cache',
+                const characters = hub.characters ?? [];
+                const collected = [];
+                for (const ch of characters) {
+                    if (!ch?.avatar || ch.avatar === 'none') continue;
+                    try {
+                        const res = await fetch('/api/characters/chats', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ avatar_url: ch.avatar }),
+                            cache: 'no-cache',
+                        });
+                        if (!res.ok) continue;
+                        const data = await res.json();
+                        const entries = data && typeof data === 'object' ? Object.values(data) : [];
+                        for (const e of entries) {
+                            if (!e || typeof e !== 'object') continue;
+                            const rawName = String(e.file_name ?? e.file_id ?? '');
+                            if (!rawName || !rawName.endsWith('.jsonl')) continue;
+                            collected.push({
+                                characterKey: ch.avatar,
+                                chatName: rawName.replace(/\.jsonl$/i, ''),
+                                preview: String(e.mes ?? '').replace(/\s+/g, ' ').slice(0, 30),
+                                lastMes: e.last_mes ?? 0,
+                            });
+                        }
+                    } catch { /* 单个角色失败不影响其它 */ }
+                }
+                // 按最后活动时间倒序（兼容时间戳与 ISO 字符串）
+                collected.sort((a, b) => {
+                    const ta = typeof a.lastMes === 'number' ? a.lastMes : new Date(a.lastMes ?? 0).getTime();
+                    const tb = typeof b.lastMes === 'number' ? b.lastMes : new Date(b.lastMes ?? 0).getTime();
+                    return (tb || 0) - (ta || 0);
                 });
-                if (!res.ok) {
-                    pushLog('warn', `读取程序聊天记录失败：HTTP ${res.status} ${res.statusText}`);
-                    return null;
-                }
-                const data = await res.json();
-                if (!Array.isArray(data)) {
-                    pushLog('warn', `读取程序聊天记录失败：返回不是数组（${typeof data}）`);
-                    return null;
-                }
-                pushLog('info', `程序聊天记录：接口返回 ${data.length} 条`);
-                if (data.length > 0) {
-                    const summary = data.slice(0, 40).map((c) => `${String(c.avatar ?? '?')}|${String(c.file_name ?? c.file_id ?? '?')}`).join('  ');
-                    pushLog('info', `条目清单：${summary}`);
-                    const sample = { ...(data[0] ?? {}) };
-                    if (!sample.avatar && !sample.file_id && !sample.file_name) {
-                        pushLog('warn', `条目字段异常：${JSON.stringify(sample).slice(0, 160)}`);
-                    }
-                }
-                const items = data
-                    .filter((c) => c.avatar && (c.file_id || c.file_name) && !c.group)
-                    .map((c) => {
-                        const rawName = String(c.file_id ?? c.file_name ?? '');
-                        return {
-                            characterKey: c.avatar,
-                            chatName: rawName.replace(/\.jsonl$/i, ''),
-                            preview: String(c.mes ?? '').replace(/\s+/g, ' ').slice(0, 30),
-                        };
-                    });
-                pushLog('info', `可展示 ${items.length} 条`);
-                return items;
+                pushLog('info', `程序聊天记录：全量读取 ${collected.length} 条（${characters.length} 个角色）`);
+                return collected.slice(0, max);
             } catch (err) {
                 pushLog('warn', `读取程序聊天记录失败: ${err?.message ?? err}`);
                 return null;
@@ -818,7 +817,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.3';
+const VERSION = '0.7.4';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
