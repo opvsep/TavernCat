@@ -328,9 +328,27 @@ const SINGLETON_HEARTBEAT_MS = 8000;
 const SINGLETON_STALE_MS = 22000;
 let singletonId = null;
 let singletonTimer = null;
+let singletonLost = false;
 
 function singletonBeat() {
+    if (!singletonId) return;
     try {
+        const raw = localStorage.getItem(SINGLETON_KEY);
+        let cur = null;
+        if (raw) {
+            try { cur = JSON.parse(raw); } catch { /* 忽略 */ }
+        }
+        if (cur && cur.id && cur.id !== singletonId && typeof cur.ts === 'number' && Date.now() - cur.ts < SINGLETON_STALE_MS) {
+            // 锁被别人接管（例如本页曾在后台、心跳被浏览器节流）：主动让位断开
+            if (!singletonLost) {
+                singletonLost = true;
+                pushLog('warn', '检测到另一个酒馆页面接管本会话，本页自动断开，避免重复回复');
+                notify('error', '另一个酒馆页面已接管 Tavern Cat，本页连接已自动断开。请只保留一个酒馆页面（窗口/标签），并把所有页面都更新到最新版本。');
+                disconnectBot();
+            }
+            return;
+        }
+        singletonLost = false;
         localStorage.setItem(SINGLETON_KEY, JSON.stringify({ id: singletonId, ts: Date.now() }));
     } catch { /* 忽略 */ }
 }
@@ -345,9 +363,15 @@ function singletonAcquire() {
             }
         }
         if (!singletonId) singletonId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        singletonLost = false;
         singletonBeat();
         if (singletonTimer) clearInterval(singletonTimer);
         singletonTimer = setInterval(singletonBeat, SINGLETON_HEARTBEAT_MS);
+        // 页面切回前台/重新聚焦时立即刷新心跳与检查，弥补后台节流
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) singletonBeat();
+        });
+        window.addEventListener('focus', singletonBeat);
         return true;
     } catch {
         return true; // localStorage 不可用时放行
@@ -355,6 +379,7 @@ function singletonAcquire() {
 }
 
 function singletonRelease() {
+    singletonLost = false;
     if (singletonTimer) {
         clearInterval(singletonTimer);
         singletonTimer = null;
@@ -694,7 +719,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.3';
+const VERSION = '0.6.4';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
