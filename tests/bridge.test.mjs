@@ -551,6 +551,25 @@ test('/历史 未配置白名单时拒绝使用（白名单不是摆设）', asy
     }
 });
 
+test('未绑定时发 /新对话：自动按默认角色接入并开新对话（不再拒绝）', async () => {
+    const ctx = await setup({
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        tavern: { greetings: { 'av-amiya': '你好呀，我是阿米娅~' } },
+    });
+    try {
+        ctx.server.pushPrivateMessage({ userId: 1111, nickname: '新人', messageId: 9951, segments: [{ type: 'text', data: { text: '/新对话' } }] });
+        assert.ok(await waitSentCount(ctx.server, 2), '应发 开场白 + 已开新对话确认 两条');
+        const greet = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
+        assert.equal(greet, '你好呀，我是阿米娅~');
+        const conf = ctx.server.sent[1].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(conf, /已开新对话/);
+        assert.ok(ctx.settings.mapping['p:1111'], '应已建立绑定');
+        assert.equal(ctx.settings.mapping['p:1111'].characterKey, 'av-amiya');
+    } finally {
+        await teardown(ctx);
+    }
+});
+
 test('工具函数：chunkText 与 parsePeerKey', () => {
     assert.deepEqual(chunkText('', 10), []);
     const c = chunkText('a'.repeat(10) + '\n' + 'b'.repeat(10), 10);

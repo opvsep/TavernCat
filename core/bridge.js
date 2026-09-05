@@ -581,23 +581,39 @@ export class NapcatBridge {
             case '/清空':
             case '/新对话': {
                 const peerKey = norm.peerKey;
-                const binding = this.settings.mapping[peerKey];
+                let binding = this.settings.mapping[peerKey] ?? null;
+                // 未绑定时也允许：自动按默认角色接入并开新对话（不再说“尚未绑定”拒绝）
                 if (!binding) {
-                    reply = '本会话尚未绑定角色。';
-                    break;
+                    await this.host.waitForCharacters?.();
+                    const chars = this.host.listCharacters?.() ?? [];
+                    const defKey = this.settings.defaultCharacterKey && chars.some((c) => c.key === this.settings.defaultCharacterKey)
+                        ? this.settings.defaultCharacterKey
+                        : chars[0]?.key;
+                    if (!defKey) {
+                        reply = '酒馆里还没有可用的角色卡，暂时无法开新对话。请先在酒馆添加角色卡后再试。';
+                        break;
+                    }
+                    binding = { characterKey: defKey, chatName: null };
                 }
+                const wasUnbound = !this.settings.mapping[peerKey];
                 try {
                     const switched = await this.host.switchTo(binding.characterKey, null, peerKey); // 新建
                     binding.chatName = switched.chatName;
+                    this.settings.mapping[peerKey] = binding;
                     this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
                     this.settings.bindings[peerKey][binding.characterKey] = switched.chatName;
                     this.host.persist();
                     if (switched.created) {
-                        await this._sendNewChatGreeting(norm, binding.characterKey); // 重开后也放开场白
+                        await this._sendNewChatGreeting(norm, binding.characterKey); // 新对话：立刻放开场白
                     }
-                    reply = '已开新对话，上下文已清空。';
+                    reply = wasUnbound
+                        ? `已开新对话，并自动按默认角色「${this._charName(binding.characterKey)}」接入。`
+                        : '已开新对话，上下文已清空。';
                 } catch (err) {
-                    reply = `重置失败：${err?.message ?? err}`;
+                    const msg = String(err?.message ?? err);
+                    reply = msg.includes('已不存在')
+                        ? '重置失败：原聊天文件已不存在。已按默认角色重新准备，请再发 /新对话 或直接发消息。'
+                        : `重置失败：${msg}`;
                 }
                 break;
             }

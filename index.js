@@ -259,8 +259,11 @@ function buildHost() {
          * 等待酒馆角色列表就绪（页面刚开时 characters 可能还没加载完，避免误报“没有角色”）
          */
         waitForCharacters: async () => {
-            for (let i = 0; i < 20 && hub.characters.length === 0; i++) {
-                await new Promise((r) => setTimeout(r, 300));
+            for (let i = 0; i < 40 && hub.characters.length === 0; i++) {
+                await new Promise((r) => setTimeout(r, 500));
+            }
+            if (hub.characters.length === 0) {
+                pushLog('warn', '等待 20 秒后酒馆角色列表仍为空（hub.characters 未加载）——请确认酒馆角色已导入、页面无报错');
             }
         },
 
@@ -855,7 +858,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
