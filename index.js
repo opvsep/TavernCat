@@ -157,11 +157,13 @@ function buildHost() {
             const ctx = getContext();
             const curId = ctx.characterId === undefined || ctx.characterId === null || ctx.characterId === ''
                 ? -1 : Number(ctx.characterId);
+            pushLog('info', `[trace] switchTo key=${characterKey} chatName=${chatName ?? '(新建)'} curId=${curId} 目标idx=${idx}`);
 
             if (curId !== idx) {
                 // hub.selectCharacterById 在酒馆保存繁忙时会静默返回：必须校验 + 重试
                 let switched = false;
                 for (let attempt = 0; attempt < 5 && !switched; attempt++) {
+                    pushLog('info', `[trace] selectCharacterById 尝试 ${attempt + 1}`);
                     try {
                         await waitUntilCondition(() => !hub.is_send_press && !is_group_generating, 10000, 100);
                     } catch { /* 继续尝试 */ }
@@ -171,15 +173,20 @@ function buildHost() {
                     if (!switched && attempt < 4) await new Promise((r) => setTimeout(r, 300));
                 }
                 if (!switched) throw new Error('切换角色失败（酒馆忙或正在保存），请稍后再试');
+                pushLog('info', `[trace] 角色切换完成，当前 chat=${hub.getCurrentChatId() ?? '(空)'}`);
             }
 
             let created = false;
             if (!chatName) {
+                const stackLine = (new Error()).stack?.split('\n').slice(2, 4).join(' ← ') ?? '';
+                pushLog('info', `[trace] ★ doNewChat 将被调用（调用方：${stackLine.trim()}）`);
                 await hub.doNewChat();
                 chatName = hub.getCurrentChatId();
+                pushLog('info', `[trace] doNewChat 完成 -> chat=${chatName}`);
                 if (!chatName) throw new Error('新建聊天失败');
                 created = true;
             } else if (hub.getCurrentChatId() !== chatName) {
+                pushLog('info', `[trace] openCharacterChat -> ${chatName}`);
                 await hub.openCharacterChat(chatName);
                 if (hub.getCurrentChatId() !== chatName) throw new Error(`打开聊天失败: ${chatName}`);
             }
@@ -270,6 +277,7 @@ function buildHost() {
         injectAssistantMessage: async (text) => {
             const ctx = getContext();
             const ch = hub.characters[Number(ctx.characterId)];
+            pushLog('info', `[trace] injectAssistant: chat=${hub.getCurrentChatId()} len=${ctx.chat.length}`);
             const message = {
                 name: ch?.name ?? '角色',
                 is_user: false,
@@ -295,6 +303,7 @@ function buildHost() {
 
         generateReply: async () => {
             const before = getContext().chat.length;
+            pushLog('info', `[trace] Generate 前：chat=${hub.getCurrentChatId()} len=${before}`);
             let error = '';
             let stopped = false;
             try {
@@ -305,6 +314,7 @@ function buildHost() {
                 if (!stopped) throw err; // 非取消类错误直接抛给桥上层处理
             }
             const chatNow = getContext().chat;
+            pushLog('info', `[trace] Generate 后：chat=${hub.getCurrentChatId()} len=${chatNow.length}`);
             const appended = chatNow.slice(before).filter((m) => m && !m.is_user && !m.is_system);
             const last = appended[appended.length - 1];
             const text = last?.mes ?? '';
@@ -719,7 +729,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.6';
+const VERSION = '0.6.7';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {

@@ -305,6 +305,7 @@ export class NapcatBridge {
         const peerKey = norm.peerKey;
         const hadBinding = !!this.settings.mapping[peerKey];
         let binding = this.settings.mapping[peerKey] ?? null;
+        this._log('info', `[trace] 回合开始 ${peerKey} messageId=${norm.messageId} hadBinding=${hadBinding}`);
 
         // 1) 没有绑定 -> 用默认角色新建（先等酒馆角色列表就绪，避免页面刚开时的误判）
         if (!binding) {
@@ -371,6 +372,7 @@ export class NapcatBridge {
             this.turnPeerKey = null;
             this._emitStats();
         }
+        this._log('info', `[trace] 回合结束 ${peerKey}`);
 
         // 5) 首次自动建立绑定：在 QQ 里发一条接入引导（不发酒馆弹窗）
         if (!hadBinding && this.settings.mapping[peerKey] && this.settings.firstNotice !== false) {
