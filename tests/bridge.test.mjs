@@ -243,26 +243,21 @@ test('群聊模式 all：每条消息都回；at_only：仅 @ 回', async () => 
     }
 });
 
-test('新会话自动绑定默认角色并放开场白；/角色 切换绑定；/状态 查询', async () => {
+test('新会话自动绑定默认角色并放开场白；首次接入发引导消息；/角色 切换绑定；/状态 查询', async () => {
     const ctx = await setup({
         settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
         tavern: { greetings: { 'av-amiya': '你好呀，{{user}}，我是阿米娅~', 'av-w': '哼哼，我是W。' } },
     });
-    const createdEvents = [];
-    ctx.bridge.onBindingCreated = (p, b) => createdEvents.push({ p, b });
     try {
-        // 私聊新用户（无绑定）-> 自动建会话 + 开场白 + 回复
+        // 私聊新用户（无绑定）-> 自动建会话 + 开场白 + 回复 + 接入引导（共 4 条? 不：开场白+回复+引导 = 3 条）
         ctx.server.pushPrivateMessage({ userId: 555, nickname: '新朋友', messageId: 9201, segments: [{ type: 'text', data: { text: '你是谁' } }] });
-        assert.ok(await waitSentCount(ctx.server, 2), '应发开场白+回复两条');
+        assert.ok(await waitSentCount(ctx.server, 3), '应发开场白+回复+接入引导共三条');
         assert.equal(ctx.server.sent[0].action, 'send_private_msg');
         assert.equal(ctx.server.sent[0].params.message[0].data.text, '你好呀，新朋友，我是阿米娅~');
         assert.equal(ctx.server.sent[1].params.message[0].data.text, '回复：你是谁');
-
-        // 首次自动绑定应触发 onBindingCreated（供 UI 弹“绑定到哪个聊天”引导）
-        assert.equal(createdEvents.length, 1, '应恰好触发一次首次绑定回调');
-        assert.equal(createdEvents[0].p, 'p:555');
-        assert.equal(createdEvents[0].b.characterKey, 'av-amiya');
-        assert.ok(createdEvents[0].b.chatName, '应带新建的聊天名');
+        const notice = ctx.server.sent[2].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(notice, /Tavern Cat/, '第三条应为接入引导消息');
+        assert.match(notice, /阿米娅/, '引导消息应带角色名');
 
         // 绑定表
         const bind = ctx.settings.mapping['p:555'];
@@ -275,8 +270,8 @@ test('新会话自动绑定默认角色并放开场白；/角色 切换绑定；
             groupId: 999, userId: 555, nickname: '新朋友', messageId: 9202,
             segments: [{ type: 'at', data: { qq: String(ctx.server.selfId) } }, { type: 'text', data: { text: '/角色 2' } }],
         });
-        assert.ok(await waitSentCount(ctx.server, 3));
-        const cmdReply = ctx.server.sent[2];
+        assert.ok(await waitSentCount(ctx.server, 4));
+        const cmdReply = ctx.server.sent[3];
         const cmdText = cmdReply.params.message.map((m) => m.data.text ?? '').join('');
         assert.match(cmdText, /W/);
         assert.equal(ctx.settings.mapping['g:999'].characterKey, 'av-w');
@@ -285,8 +280,8 @@ test('新会话自动绑定默认角色并放开场白；/角色 切换绑定；
 
         // /状态
         ctx.server.pushPrivateMessage({ userId: 555, nickname: '新朋友', messageId: 9203, segments: [{ type: 'text', data: { text: '/状态' } }] });
-        assert.ok(await waitSentCount(ctx.server, 4));
-        const st = ctx.server.sent[3].params.message.map((m) => m.data.text ?? '').join('');
+        assert.ok(await waitSentCount(ctx.server, 5));
+        const st = ctx.server.sent[4].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(st, /阿米娅/);
     } finally {
         await teardown(ctx);

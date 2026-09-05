@@ -38,6 +38,7 @@ export const DEFAULT_SETTINGS = {
     replyQuote: true,
     greetNewChat: true,
     maxReplyChars: 1800,
+    firstNotice: true, // 会话首次接入时，在 QQ 里发一条引导消息
 };
 
 /** 把长文本切成 <=maxChars 的块。按“行”打包，保证 chunks.join('\n') === 原文（超长单行按字数硬切）。 */
@@ -300,14 +301,28 @@ export class NapcatBridge {
             this._emitStats();
         }
 
-        // 5) 首次自动建立绑定 -> 通知 UI 弹出“绑定到哪个聊天”的引导
-        if (!hadBinding && this.settings.mapping[peerKey] && this.onBindingCreated) {
+        // 5) 首次自动建立绑定：在 QQ 里发一条接入引导（不发酒馆弹窗）
+        if (!hadBinding && this.settings.mapping[peerKey] && this.settings.firstNotice !== false) {
             try {
-                this.onBindingCreated(peerKey, { ...this.settings.mapping[peerKey] });
+                const notice = this.buildFirstNotice(norm, this.settings.mapping[peerKey]);
+                const data = await this.bot.sendText(norm.peerId, notice, norm.scope);
+                if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
             } catch (err) {
-                this._log('warn', `onBindingCreated 回调异常: ${err?.message ?? err}`);
+                this._log('warn', `首次接入引导发送失败: ${err?.message ?? err}`);
             }
         }
+    }
+
+    /** 首次接入引导文案（QQ 会话第一次接入时发给对方） */
+    buildFirstNotice(norm, binding) {
+        const charName = this._charName(binding.characterKey);
+        const chatName = binding.chatName || '新对话';
+        return [
+            `【Tavern Cat】本会话已接入酒馆角色「${charName}」（${chatName}）。`,
+            `· 想接着酒馆里已有的聊天继续：在酒馆扩展「进阶设置 → QQ 会话绑定」中把本会话绑到那个聊天；`,
+            `· 换角色：发 /角色列表 查看，再用 /角色 <名称> 切换（会接回该角色以前用过的对话）；`,
+            `· 其他命令：/帮助、/状态、/关闭、/开启、/重置`,
+        ].join('\n');
     }
 
     // ---------- 发送回传（含引用/分块/记录 message_id） ----------

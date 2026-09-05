@@ -56,7 +56,6 @@ const HUB_KEYS = [
     'chat_metadata', 'characters', 'doNewChat', 'Generate', 'getCurrentChatId',
     'is_send_press', 'openCharacterChat', 'saveChatConditional',
     'saveSettingsDebounced', 'selectCharacterById', 'sendMessageAsUser',
-    'getRequestHeaders',
 ];
 let missingHubApi = [];    // 当前酒馆版本缺失的 API（用于友好提示）
 
@@ -432,6 +431,7 @@ function refreshAdvancedPanel() {
     advancedEl.querySelector('#ncb_greetNewChat').checked = cfg.greetNewChat !== false;
     advancedEl.querySelector('#ncb_ownerIds').value = cfg.ownerIdsText ?? '';
     advancedEl.querySelector('#ncb_maxChars').value = cfg.maxReplyChars || 1800;
+    advancedEl.querySelector('#ncb_firstNotice').checked = cfg.firstNotice !== false;
     populateCharSelect(advancedEl.querySelector('#ncb_defaultChar'), cfg.defaultCharacterKey);
 
     refreshSessionTable();
@@ -509,126 +509,6 @@ function bindCurrentChatToPeer(peerKey) {
     refreshSessionTable();
 }
 
-// ---------------- 首次接入引导：自动弹出“绑定到哪个聊天” ----------------
-
-let firstBindOverlay = null;
-let firstBindPeerKey = null;
-
-function closeFirstBindDialog() {
-    if (!firstBindOverlay) return;
-    const esc = firstBindOverlay._escHandler;
-    if (esc) document.removeEventListener('keydown', esc, true);
-    firstBindOverlay.remove();
-    firstBindOverlay = null;
-    firstBindPeerKey = null;
-}
-
-async function fetchRecentChats(max = 12) {
-    const headers = hub?.getRequestHeaders ? hub.getRequestHeaders() : {};
-    const res = await fetch('/api/chats/recent', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ max, pinned: [] }),
-        cache: 'no-cache',
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
-}
-
-/** 把某个 QQ 会话绑到一个已存在的 (角色, 聊天)，并立即切过去让用户看到 */
-async function bindExistingChat(peerKey, avatar, fileId) {
-    const character = hub.characters.find((c) => String(c.avatar) === avatar);
-    if (!character) {
-        notify('error', `找不到角色卡 ${avatar}（可能已删除），请换一个`);
-        return;
-    }
-    const cfg = config();
-    cfg.mapping[peerKey] = { characterKey: avatar, chatName: fileId };
-    cfg.bindings[peerKey] = cfg.bindings[peerKey] ?? {};
-    cfg.bindings[peerKey][avatar] = fileId;
-    if (cfg.peerEnabled[peerKey] === false) cfg.peerEnabled[peerKey] = true;
-    persist();
-    try {
-        await host.switchTo(avatar, fileId, peerKey);
-    } catch (err) {
-        pushLog('error', `切换至 ${fileId} 失败：${err?.message ?? err}`);
-    }
-    toastr.success(`QQ ${peerKey} 已接入「${character.name}」的聊天：${fileId}（可删除刚才新建的临时对话）`, APP_NAME);
-    closeFirstBindDialog();
-    refreshSessionTable();
-}
-
-function renderFirstBindList(list) {
-    const box = firstBindOverlay?.querySelector('#tc_fb_list');
-    if (!box) return;
-    box.innerHTML = '';
-    const items = (list || []).filter((c) => c.avatar && c.file_id && !c.group);
-    if (items.length === 0) {
-        box.textContent = '没有找到可绑定的已有聊天——保持“新建对话”即可，之后可在进阶设置里改绑。';
-        return;
-    }
-    for (const it of items) {
-        const ch = hub.characters.find((c) => String(c.avatar) === it.avatar);
-        const title = `${ch?.name ?? it.avatar} · ${it.file_id}`;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'tc-fb-item';
-        btn.innerHTML = `<span>${escapeHtml(title)}</span><span class="tc-fb-sub">${escapeHtml(String(it.mes ?? '').slice(0, 60))}</span>`;
-        btn.addEventListener('click', () => bindExistingChat(firstBindPeerKey, it.avatar, it.file_id));
-        box.appendChild(btn);
-    }
-}
-
-function showFirstBindDialog(peerKey, binding) {
-    if (modalOverlay || firstBindOverlay) return;
-    const character = hub.characters.find((c) => String(c.avatar) === binding.characterKey);
-    const charName = character?.name ?? binding.characterKey;
-
-    const overlay = document.createElement('div');
-    overlay.className = 'tc-modal-overlay';
-    const modal = document.createElement('div');
-    modal.className = 'tc-modal tc-modal-sm';
-    modal.innerHTML = `
-        <div class="tc-fb-header"><img class="tc-logo" src="${LOGO_URL}" alt="" /> QQ 会话首次接入</div>
-        <div class="tc-fb-body">
-            <p>会话 <b>${escapeHtml(peerKey)}</b> 第一次发来消息，已自动为它新建对话：<b>${escapeHtml(charName)}</b> / ${escapeHtml(binding.chatName ?? '（新）')}。</p>
-            <p>如果希望它接着 <b>酒馆里已有的聊天</b>（原有角色与历史不变）继续，从下面选一个；否则保持新建即可。</p>
-            <div id="tc_fb_list" class="tc-fb-list">正在读取最近的聊天…</div>
-        </div>
-        <div class="tc-fb-footer">
-            <button id="tc_fb_keep" class="menu_button">保持新建的对话</button>
-            <span class="tc-hint">以后随时可在「进阶设置 → QQ 会话绑定」改绑</span>
-        </div>`;
-
-    const closeBtn = document.createElement('div');
-    closeBtn.className = 'fa-solid fa-circle-xmark tc-modal-close';
-    closeBtn.title = '关闭';
-    closeBtn.addEventListener('click', closeFirstBindDialog);
-    modal.appendChild(closeBtn);
-    overlay.appendChild(modal);
-    overlay.addEventListener('mousedown', (ev) => {
-        if (ev.target === overlay) closeFirstBindDialog();
-    });
-    const escHandler = (ev) => {
-        if (ev.key === 'Escape') closeFirstBindDialog();
-    };
-    overlay._escHandler = escHandler;
-    document.addEventListener('keydown', escHandler, true);
-
-    firstBindOverlay = overlay;
-    firstBindPeerKey = peerKey;
-    document.body.appendChild(overlay);
-
-    modal.querySelector('#tc_fb_keep').addEventListener('click', closeFirstBindDialog);
-    fetchRecentChats(12)
-        .then((list) => renderFirstBindList(list))
-        .catch((err) => {
-            const box = overlay.querySelector('#tc_fb_list');
-            if (box) box.textContent = `读取最近聊天失败（${err?.message ?? err}）——可保持新建，或稍后在进阶设置里手动绑定。`;
-        });
-}
-
 function bindAdvancedEvents(root) {
     const $ = (s) => root.querySelector(s);
 
@@ -659,6 +539,7 @@ function bindAdvancedEvents(root) {
         cfg.ownerIdsText = $('#ncb_ownerIds').value;
         cfg.ownerIds = parseOwnerIds(cfg.ownerIdsText);
         cfg.maxReplyChars = Math.max(100, Number($('#ncb_maxChars').value) || 1800);
+        cfg.firstNotice = $('#ncb_firstNotice').checked;
         cfg.defaultCharacterKey = $('#ncb_defaultChar').value;
         persist();
         toastr.success('设置已保存', APP_NAME);
@@ -698,7 +579,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.0';
+const VERSION = '0.5.1';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
@@ -818,13 +699,6 @@ export async function init() {
         if (statsTimer) clearTimeout(statsTimer);
         statsTimer = setTimeout(renderStats, 300);
     };
-    // 首次接入引导：某个 QQ 会话第一次自动创建绑定后，弹出“接着哪个已有聊天”的选择
-    bridge.onBindingCreated = (peerKey, binding) => {
-        pushLog('info', `QQ 会话 ${peerKey} 首次接入，等待选择绑定目标`);
-        if (modalOverlay || firstBindOverlay) return; // 设置面板已开时不做弹窗打扰
-        setTimeout(() => showFirstBindDialog(peerKey, binding), 900);
-    };
-
     // 酒馆本地消息 -> QQ
     eventSource.on(event_types.MESSAGE_SENT, onUserMessageSent);
     eventSource.on(event_types.MESSAGE_RECEIVED, onAssistantMessageReceived);
