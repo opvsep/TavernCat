@@ -312,16 +312,32 @@ function buildHost() {
                     body: JSON.stringify({ max, pinned: [] }),
                     cache: 'no-cache',
                 });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.ok) {
+                    pushLog('warn', `读取程序聊天记录失败：HTTP ${res.status} ${res.statusText}`);
+                    return null;
+                }
                 const data = await res.json();
-                if (!Array.isArray(data)) return [];
-                return data
-                    .filter((c) => c.avatar && c.file_id && !c.group) // 仅角色聊天
+                if (!Array.isArray(data)) {
+                    pushLog('warn', `读取程序聊天记录失败：返回不是数组（${typeof data}）`);
+                    return null;
+                }
+                pushLog('info', `程序聊天记录：接口返回 ${data.length} 条`);
+                if (data.length > 0) {
+                    const sample = { ...(data[0] ?? {}) };
+                    pushLog('info', `首条字段：${Object.keys(sample).join(', ')}`);
+                    if (!sample.avatar || !sample.file_id) {
+                        pushLog('warn', `首条缺少 avatar/file_id：${JSON.stringify(sample).slice(0, 160)}`);
+                    }
+                }
+                const items = data
+                    .filter((c) => c.avatar && c.file_id && !c.group)
                     .map((c) => ({
                         characterKey: c.avatar,
                         chatName: c.file_id,
                         preview: String(c.mes ?? '').replace(/\s+/g, ' ').slice(0, 30),
                     }));
+                pushLog('info', `可展示 ${items.length} 条`);
+                return items;
             } catch (err) {
                 pushLog('warn', `读取程序聊天记录失败: ${err?.message ?? err}`);
                 return null;
@@ -798,7 +814,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
