@@ -44,8 +44,7 @@ let bot = null;            // 当前 OneBotClient
 let bridge = null;         // 桥接编排核心
 let host = null;           // TavernHost 实现
 let injectingUser = false; // 正在注入 QQ 用户消息（避免 MESSAGE_SENT 回推）
-let advancedEl = null;     // 当前打开的进阶设置弹窗容器
-let basicEl = null;        // 当前打开的基础设置弹窗容器
+let advancedEl = null;     // 当前打开的设置弹窗容器（基础/进阶为同一弹窗的标签页）
 let lastStatus = { connected: false, selfId: null };
 const logLines = [];
 const MAX_LOG = 300;
@@ -280,12 +279,12 @@ function syncStatusUi() {
     const s = { ...lastStatus, reason: lastStatus.reason };
     const connected = !!s.connected;
 
-    // 魔法棒图标按钮的角标状态点
+    // 魔法棒菜单状态点（行尾圆点）
     const dotState = connected ? 'tc-ok' : (s.reason === 'reconnecting' ? 'tc-busy' : 'tc-off');
     for (const dot of menuDots) {
-        dot.className = `tc-wand-dot ${dotState}`;
+        dot.className = `tc-menu-dot ${dotState}`;
     }
-    // 进阶面板
+    // 设置弹窗（头部状态行）
     if (advancedEl) {
         const dot = advancedEl.querySelector('#ncb_status_dot');
         const label = advancedEl.querySelector('#ncb_status_text');
@@ -297,21 +296,6 @@ function syncStatusUi() {
         }
         const c = advancedEl.querySelector('#ncb_connect');
         const d = advancedEl.querySelector('#ncb_disconnect');
-        if (c) c.disabled = connected;
-        if (d) d.disabled = !connected;
-    }
-    // 基础面板
-    if (basicEl) {
-        const dot = basicEl.querySelector('#ncbB_status_dot');
-        const label = basicEl.querySelector('#ncbB_status_text');
-        if (dot && label) {
-            dot.className = 'ncb-dot ' + (connected ? 'ncb-ok' : (s.reason === 'reconnecting' ? 'ncb-busy' : 'ncb-off'));
-            label.textContent = connected
-                ? `已连接（机器人 QQ：${s.selfId ?? '未知'}）`
-                : (s.reason === 'reconnecting' ? '连接中断，正在自动重连…' : '未连接');
-        }
-        const c = basicEl.querySelector('#ncbB_connect');
-        const d = basicEl.querySelector('#ncbB_disconnect');
         if (c) c.disabled = connected;
         if (d) d.disabled = !connected;
     }
@@ -423,86 +407,8 @@ function renderStats() {
     }
 }
 
-// ---------------- 基础设置面板（日常最常用） ----------------
+// ---------------- 设置弹窗（基础 + 进阶 合并在 settings.html 一个弹窗内，顶部标签页切换） ----------------
 
-const BASIC_HTML = `
-<div id="tc_basic_root" class="tc-panel">
-    <div class="tc-title"><img class="tc-logo" src="${LOGO_URL}" alt="NapCat" /> ${APP_NAME} · 基础设置</div>
-
-    <div class="tc-section">
-        <div class="tc-row">
-            <span id="ncbB_status_dot" class="ncb-dot ncb-off"></span>
-            <span id="ncbB_status_text">未连接</span>
-            <button id="ncbB_connect" class="menu_button">连接</button>
-            <button id="ncbB_disconnect" class="menu_button" disabled>断开</button>
-        </div>
-    </div>
-
-    <div class="tc-section">
-        <div class="tc-grid">
-            <label>NapCat WS 地址
-                <input type="text" id="ncbB_wsUrl" placeholder="ws://127.0.0.1:3001">
-            </label>
-            <label>Access Token（NapCat 里没设置就留空）
-                <input type="password" id="ncbB_token" placeholder="可选">
-            </label>
-            <label>群聊回复模式
-                <select id="ncbB_groupMode">
-                    <option value="at_reply">@机器人 / 回复机器人才回（推荐）</option>
-                    <option value="at_only">只有 @ 机器人才回</option>
-                    <option value="all">群里所有消息都回</option>
-                </select>
-            </label>
-            <label>新会话默认角色
-                <select id="ncbB_defaultChar"></select>
-            </label>
-        </div>
-        <div class="tc-row">
-            <label class="ncb-inline"><input type="checkbox" id="ncbB_autoConnect"> 打开酒馆页面时自动连接</label>
-        </div>
-    </div>
-
-    <div class="tc-tip">这里改动即时保存。进阶功能（会话绑定、私聊白名单、开场白、引用回复、日志等）请打开魔法棒里的「${APP_NAME} · 进阶设置」。</div>
-</div>`;
-
-function collectBasicFrom(el) {
-    const cfg = config();
-    cfg.wsUrl = el.querySelector('#ncbB_wsUrl').value.trim();
-    cfg.token = el.querySelector('#ncbB_token').value.trim();
-    cfg.autoConnect = el.querySelector('#ncbB_autoConnect').checked;
-    cfg.groupMode = el.querySelector('#ncbB_groupMode').value;
-    cfg.defaultCharacterKey = el.querySelector('#ncbB_defaultChar').value;
-    persist();
-}
-
-function openBasicPanel() {
-    const wrap = document.createElement('div');
-    wrap.innerHTML = BASIC_HTML;
-    basicEl = wrap.querySelector('#tc_basic_root');
-    const cfg = config();
-
-    basicEl.querySelector('#ncbB_wsUrl').value = cfg.wsUrl ?? '';
-    basicEl.querySelector('#ncbB_token').value = cfg.token ?? '';
-    basicEl.querySelector('#ncbB_autoConnect').checked = !!cfg.autoConnect;
-    basicEl.querySelector('#ncbB_groupMode').value = cfg.groupMode ?? 'at_reply';
-    populateCharSelect(basicEl.querySelector('#ncbB_defaultChar'), cfg.defaultCharacterKey);
-
-    basicEl.querySelector('#ncbB_connect').addEventListener('click', connectBot);
-    basicEl.querySelector('#ncbB_disconnect').addEventListener('click', disconnectBot);
-    for (const sel of ['#ncbB_wsUrl', '#ncbB_token', '#ncbB_autoConnect', '#ncbB_groupMode', '#ncbB_defaultChar']) {
-        basicEl.querySelector(sel).addEventListener('change', () => {
-            collectBasicFrom(basicEl);
-            toastr.success('已保存', APP_NAME);
-        });
-    }
-
-    syncStatusUi();
-    callGenericPopup(basicEl, POPUP_TYPE.TEXT, '', { okButton: '关闭', wide: true }).finally(() => {
-        basicEl = null;
-    });
-}
-
-// ---------------- 进阶设置面板 ----------------
 
 function refreshAdvancedPanel() {
     if (!advancedEl) return;
@@ -559,6 +465,20 @@ function refreshSessionTable() {
 function bindAdvancedEvents(root) {
     const $ = (s) => root.querySelector(s);
 
+    // 顶部标签页切换：基础设置 / 进阶设置（同一弹窗）
+    const showTab = (name) => {
+        root.querySelectorAll('.tc-tab').forEach((t) => t.classList.toggle('tc-tab-active', t.dataset.tab === name));
+        const bp = root.querySelector('#tc_tab_basic');
+        const ap = root.querySelector('#tc_tab_advanced');
+        if (bp) bp.style.display = name === 'basic' ? '' : 'none';
+        if (ap) ap.style.display = name === 'advanced' ? '' : 'none';
+    };
+    root.addEventListener('click', (ev) => {
+        const tab = ev.target.closest('.tc-tab');
+        if (tab) showTab(tab.dataset.tab);
+    });
+    showTab('basic');
+
     $('#ncb_connect')?.addEventListener('click', connectBot);
     $('#ncb_disconnect')?.addEventListener('click', disconnectBot);
     $('#ncb_save')?.addEventListener('click', () => {
@@ -606,7 +526,7 @@ async function openAdvancedPanel() {
         if (!advancedEl) advancedEl = wrap;
         bindAdvancedEvents(advancedEl);
         refreshAdvancedPanel();
-        await callGenericPopup(advancedEl, POPUP_TYPE.TEXT, '', { okButton: '关闭', wide: true, allowHorizontalScroll: true });
+        await callGenericPopup(advancedEl, POPUP_TYPE.TEXT, '', { okButton: '关闭' });
     } catch (err) {
         console.error(`[${APP_NAME}] 打开进阶设置失败`, err);
         notify('error', `打开面板失败：${err?.message ?? err}`);
@@ -615,17 +535,15 @@ async function openAdvancedPanel() {
     }
 }
 
-// ---------------- 魔法棒菜单（与内置扩展一致的图标按钮 + 右下角状态点） ----------------
+// ---------------- 魔法棒菜单（单入口：图标 + 名称 + 行尾状态点） ----------------
 
-const WAND_CONTAINER_ID = 'tavern_cat_wand_container';
-
-function makeWandButton({ html, title, onClick }) {
-    const btn = document.createElement('div');
-    btn.className = 'tc-wand-btn';
-    btn.title = title;
-    btn.innerHTML = html;
-    btn.addEventListener('click', onClick);
-    return btn;
+function makeMenuItem(label, onClick) {
+    const item = document.createElement('div');
+    item.className = 'list-group-item flex-container flexGap5';
+    item.innerHTML = `<img class="tc-logo" src="${LOGO_URL}" alt="NapCat" /><span>${label}</span><span class="tc-menu-dot tc-off"></span>`;
+    item.title = '连接状态：绿=已连接 / 黄=重连中 / 灰=未连接';
+    item.addEventListener('click', onClick);
+    return item;
 }
 
 function mountMenu() {
@@ -634,28 +552,9 @@ function mountMenu() {
         setTimeout(mountMenu, 1000);
         return;
     }
-    let container = document.getElementById(WAND_CONTAINER_ID);
-    if (!container) {
-        container = document.createElement('div');
-        container.id = WAND_CONTAINER_ID;
-        container.className = 'extension_container';
-        menu.appendChild(container);
-    } else {
-        container.innerHTML = ''; // 幂等：重复挂载时先清空
-    }
-    const basic = makeWandButton({
-        html: `<img class="tc-wand-logo" src="${LOGO_URL}" alt="" /><span class="tc-wand-dot tc-off"></span>`,
-        title: `${APP_NAME} · 基础设置（连接 / 常用配置）`,
-        onClick: () => openBasicPanel(),
-    });
-    const adv = makeWandButton({
-        html: `<div class="fa-solid fa-sliders extensionsMenuExtensionButton"></div><span class="tc-wand-dot tc-off"></span>`,
-        title: `${APP_NAME} · 进阶设置（会话绑定 / 白名单 / 日志）`,
-        onClick: () => openAdvancedPanel(),
-    });
-    menuDots.push(basic.querySelector('.tc-wand-dot'), adv.querySelector('.tc-wand-dot'));
-    container.appendChild(basic);
-    container.appendChild(adv);
+    const entry = makeMenuItem(APP_NAME, () => openAdvancedPanel());
+    menuDots.push(entry.querySelector('.tc-menu-dot'));
+    menu.appendChild(entry);
     syncStatusUi();
 }
 
