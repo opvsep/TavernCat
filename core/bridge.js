@@ -80,7 +80,7 @@ export function chunkText(text, maxChars = 1800) {
     return chunks;
 }
 
-const COMMAND_NAMES = ['/帮助', '/help', '/角色列表', '/角色', '/重置', '/清空', '/状态', '/关闭', '/开启'];
+const COMMAND_NAMES = ['/帮助', '/help', '/角色列表', '/角色', '/重置', '/清空', '/状态', '/关闭', '/开启', '/引导'];
 
 export class NapcatBridge {
     /**
@@ -234,6 +234,7 @@ export class NapcatBridge {
             const defaultKey = this.settings.defaultCharacterKey ?? chars[0]?.key;
             if (!defaultKey) {
                 this._log('error', `会话 ${peerKey} 无绑定且没有可用角色，请先在扩展面板设置默认角色`);
+                await this._safeReply(norm, '【Tavern Cat】暂时无法接入：酒馆里还没有可用的角色卡（或未设置「新会话默认角色」）。\n请先在酒馆添加/导入角色卡，再打开扩展「基础设置 → 新会话默认角色」选好，然后重新发送消息。');
                 return;
             }
             binding = { characterKey: defaultKey, chatName: null };
@@ -244,6 +245,7 @@ export class NapcatBridge {
         const charExists = chars.some((c) => c.key === binding.characterKey);
         if (!charExists) {
             this._log('error', `角色 ${binding.characterKey} 不存在，请重新绑定`);
+            await this._safeReply(norm, '【Tavern Cat】绑定的角色卡已不存在。请在扩展「进阶设置 → QQ 会话绑定」重新绑定，或用 /角色列表 查看可用角色后 /角色 <名称> 切换。');
             return;
         }
 
@@ -325,6 +327,16 @@ export class NapcatBridge {
         ].join('\n');
     }
 
+    /** 兜底回复：任何处理失败都要让 QQ 侧知道发生了什么（不允许静默无响应） */
+    async _safeReply(norm, text) {
+        try {
+            const data = await this.bot.sendText(norm.peerId, String(text), norm.scope);
+            if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
+        } catch (err) {
+            this._log('error', `兜底回复发送失败: ${err?.message ?? err}`);
+        }
+    }
+
     // ---------- 发送回传（含引用/分块/记录 message_id） ----------
     async _sendToPeer(norm, text, { quote = false } = {}) {
         const chunks = chunkText(text, this.settings.maxReplyChars || 1800);
@@ -374,7 +386,8 @@ export class NapcatBridge {
             case '/help':
             case '/帮助':
                 reply = [
-                    '【NapCat 酒馆桥】可用指令：',
+                    '【Tavern Cat】可用指令：',
+                    '/引导 - 查看/重发本会话接入引导',
                     '/角色列表 - 查看可选角色',
                     '/角色 <名称或序号> - 切换本会话角色（对话自动分开）',
                     '/重置 - 清空本会话上下文并开新对话',
@@ -382,6 +395,13 @@ export class NapcatBridge {
                     '/关闭 / /开启 - 暂停/恢复本会话',
                 ].join('\n');
                 break;
+            case '/引导': {
+                const b = this.settings.mapping[norm.peerKey];
+                reply = b
+                    ? `【Tavern Cat】本会话当前绑定：角色「${this._charName(b.characterKey)}」/ 聊天 ${b.chatName ?? '(未建)'}\n· 换角色：发 /角色 <名称>；\n· 想接着酒馆里已有的聊天继续：在扩展「进阶设置 → QQ 会话绑定」把本会话绑到那个聊天；\n· 更多命令：/帮助`
+                    : '【Tavern Cat】本会话还没有绑定角色。\n· 发 /角色列表 查看可用角色，用 /角色 <名称> 绑定；\n· 或直接发普通消息，将自动使用默认角色接入。';
+                break;
+            }
             case '/角色列表': {
                 if (chars.length === 0) {
                     reply = '当前没有任何可用角色，请先在酒馆添加角色卡。';

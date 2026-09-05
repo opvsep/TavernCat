@@ -385,6 +385,35 @@ test('长回复按换行分块，保持顺序', async () => {
     }
 });
 
+test('无可用角色时不得沉默：向 QQ 回复原因说明', async () => {
+    const ctx = await setup({
+        settings: { defaultCharacterKey: '' },
+        tavern: { characters: [], greetings: {} },
+    });
+    try {
+        ctx.server.pushPrivateMessage({ userId: 666, nickname: '路人', messageId: 9601, segments: [{ type: 'text', data: { text: '你好' } }] });
+        assert.ok(await waitSentCount(ctx.server, 1), '应回复一条说明');
+        const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(t, /Tavern Cat/, '说明消息带 Tavern Cat 前缀');
+        assert.match(t, /角色卡/, '说明应提示缺少角色卡');
+    } finally {
+        await teardown(ctx);
+    }
+});
+
+test('/引导 指令可手动触发接入引导（未绑定场景）', async () => {
+    const ctx = await setup({ settings: {}, tavern: { greetings: {} } });
+    try {
+        ctx.server.pushPrivateMessage({ userId: 777, nickname: '主人', messageId: 9602, segments: [{ type: 'text', data: { text: '/引导' } }] });
+        assert.ok(await waitSentCount(ctx.server, 1), '/引导 应回复');
+        const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(t, /Tavern Cat/);
+        assert.match(t, /还没有绑定/);
+    } finally {
+        await teardown(ctx);
+    }
+});
+
 test('工具函数：chunkText 与 parsePeerKey', () => {
     assert.deepEqual(chunkText('', 10), []);
     const c = chunkText('a'.repeat(10) + '\n' + 'b'.repeat(10), 10);
