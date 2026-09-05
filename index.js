@@ -528,7 +528,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.3.1';
+const VERSION = '0.3.2';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
