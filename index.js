@@ -330,12 +330,15 @@ function buildHost() {
                     }
                 }
                 const items = data
-                    .filter((c) => c.avatar && c.file_id && !c.group)
-                    .map((c) => ({
-                        characterKey: c.avatar,
-                        chatName: c.file_id,
-                        preview: String(c.mes ?? '').replace(/\s+/g, ' ').slice(0, 30),
-                    }));
+                    .filter((c) => c.avatar && (c.file_id || c.file_name) && !c.group)
+                    .map((c) => {
+                        const rawName = String(c.file_id ?? c.file_name ?? '');
+                        return {
+                            characterKey: c.avatar,
+                            chatName: rawName.replace(/\.jsonl$/i, ''),
+                            preview: String(c.mes ?? '').replace(/\s+/g, ' ').slice(0, 30),
+                        };
+                    });
                 pushLog('info', `可展示 ${items.length} 条`);
                 return items;
             } catch (err) {
@@ -814,7 +817,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.1';
+const VERSION = '0.7.2';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
