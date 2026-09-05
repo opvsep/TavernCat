@@ -326,6 +326,52 @@ function buildHost() {
 
 // ---------------- 连接管理与状态同步 ----------------
 
+// ---- 单实例互斥：同一酒馆账号只允许一个页面处理 QQ（防“双份开场白/双聊天文件”） ----
+const SINGLETON_KEY = 'tavernCat.activeInstance';
+const SINGLETON_HEARTBEAT_MS = 8000;
+const SINGLETON_STALE_MS = 22000;
+let singletonId = null;
+let singletonTimer = null;
+
+function singletonBeat() {
+    try {
+        localStorage.setItem(SINGLETON_KEY, JSON.stringify({ id: singletonId, ts: Date.now() }));
+    } catch { /* 忽略 */ }
+}
+
+function singletonAcquire() {
+    try {
+        const raw = localStorage.getItem(SINGLETON_KEY);
+        if (raw) {
+            const other = JSON.parse(raw);
+            if (other && other.id !== singletonId && typeof other.ts === 'number' && Date.now() - other.ts < SINGLETON_STALE_MS) {
+                return false; // 另一个酒馆页面正在活跃运行
+            }
+        }
+        if (!singletonId) singletonId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        singletonBeat();
+        if (singletonTimer) clearInterval(singletonTimer);
+        singletonTimer = setInterval(singletonBeat, SINGLETON_HEARTBEAT_MS);
+        return true;
+    } catch {
+        return true; // localStorage 不可用时放行
+    }
+}
+
+function singletonRelease() {
+    if (singletonTimer) {
+        clearInterval(singletonTimer);
+        singletonTimer = null;
+    }
+    try {
+        const raw = localStorage.getItem(SINGLETON_KEY);
+        if (raw) {
+            const cur = JSON.parse(raw);
+            if (cur && cur.id === singletonId) localStorage.removeItem(SINGLETON_KEY);
+        }
+    } catch { /* 忽略 */ }
+}
+
 function statusOf(now) {
     return {
         connected: bot?.isConnected ?? false,
@@ -372,6 +418,13 @@ function attachBot(client) {
 
 function connectBot() {
     if (bot) disconnectBot();
+    // 单实例互斥：同一账号只允许一个酒馆页面处理 QQ
+    if (!singletonAcquire()) {
+        notify('error', '检测到另一个酒馆页面正在运行 Tavern Cat：为避免重复回复与重复创建聊天，本页已停用连接。请关闭另一个酒馆页面/标签后，刷新本页再点连接。');
+        pushLog('warn', '单实例互斥：检测到其他活跃页面，已拒绝本页连接');
+        syncStatusUi();
+        return;
+    }
     const cfg = config();
     if (!cfg.wsUrl) {
         notify('error', '请先填写 NapCat WebSocket 地址');
@@ -403,6 +456,7 @@ function disconnectBot() {
         bot = null;
     }
     if (bridge) bridge.setBot(null);
+    singletonRelease();
     lastStatus = statusOf();
     syncStatusUi();
     pushLog('info', '已断开连接');
@@ -644,7 +698,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.5.9';
+const VERSION = '0.6.0';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
@@ -769,6 +823,8 @@ export async function init() {
     eventSource.on(event_types.MESSAGE_RECEIVED, onAssistantMessageReceived);
 
     mountMenu();
+    // 页面关闭/隐藏时释放单实例锁，让另一个页面能接管
+    window.addEventListener('pagehide', singletonRelease);
 
     if (cfg.autoConnect && cfg.wsUrl) {
         setTimeout(() => connectBot(), 800);
