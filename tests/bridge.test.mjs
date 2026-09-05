@@ -49,6 +49,10 @@ class StubTavern {
         return this.greetings[characterKey] ?? null;
     }
 
+    getAvatarUrl() {
+        return null; // 测试默认无自定义头像；需要时用例内覆写
+    }
+
     async injectUserMessage(text, meta = {}) {
         const key = `${this.current.characterKey}|${this.current.chatName}`;
         this.history[key].push({ role: 'user', name: meta.senderName ?? '我', text, extra: { qq: meta } });
@@ -450,6 +454,38 @@ test('/指令 展示全部指令；/解绑 恢复初始状态并支持重新接�
         assert.ok(ctx.settings.mapping['p:888'], '重新接入后 mapping 重建');
         const notice2 = ctx.server.sent[7].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(notice2, /\/指令/, '重新接入仍发带 /指令 的引导');
+    } finally {
+        await teardown(ctx);
+    }
+});
+
+test('角色无自定义头像（默认头像）：新接入时不发图片，只发开场白', async () => {
+    const ctx = await setup({
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        tavern: { greetings: { 'av-amiya': '你好呀，我是阿米娅~' } },
+    });
+    try {
+        ctx.server.pushPrivateMessage({ userId: 901, nickname: 'A', messageId: 9801, segments: [{ type: 'text', data: { text: '嗨' } }] });
+        assert.ok(await waitSentCount(ctx.server, 3), '应发 开场白+回复+引导');
+        assert.notEqual(ctx.server.sent[0].params.message[0].type, 'image', '无自定义头像不应发图片');
+    } finally {
+        await teardown(ctx);
+    }
+});
+
+test('角色有自定义头像：新接入时先发头像图片，再发开场白', async () => {
+    const ctx = await setup({
+        settings: { defaultCharacterKey: 'av-amiya', ownerIds: [] },
+        tavern: { greetings: { 'av-amiya': '你好呀，我是阿米娅~' } },
+    });
+    ctx.tavern.getAvatarUrl = () => 'http://127.0.0.1:8000/img/avatars/av-amiya.png';
+    try {
+        ctx.server.pushPrivateMessage({ userId: 902, nickname: 'B', messageId: 9802, segments: [{ type: 'text', data: { text: '嗨' } }] });
+        assert.ok(await waitSentCount(ctx.server, 4), '有头像时应发 图+开场白+回复+引导 共 4 条');
+        assert.equal(ctx.server.sent[0].params.message[0].type, 'image', '第一条应是图片');
+        assert.equal(ctx.server.sent[0].params.message[0].data.file, 'http://127.0.0.1:8000/img/avatars/av-amiya.png');
+        const g = ctx.server.sent[1].params.message.map((m) => m.data.text ?? '').join('');
+        assert.equal(g, '你好呀，我是阿米娅~', '图片之后紧跟开场白');
     } finally {
         await teardown(ctx);
     }

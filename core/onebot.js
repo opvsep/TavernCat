@@ -240,6 +240,22 @@ export class OneBotClient {
         return this.sendAction('get_login_info', {}, 10000);
     }
 
+    /**
+     * 发送一张图片（file 可为 http(s) URL 或 base64://…）。
+     * @param {number|string} target 群号或 QQ 号
+     * @param {string} fileUrl 图片 URL / base64
+     * @param {'group'|'private'} messageType
+     */
+    async sendImage(target, fileUrl, messageType) {
+        const params = { message: [{ type: 'image', data: { file: String(fileUrl) } }] };
+        if (messageType === 'group') {
+            params.group_id = Number(target);
+            return this.sendAction('send_group_msg', params);
+        }
+        params.user_id = Number(target);
+        return this.sendAction('send_private_msg', params);
+    }
+
     /** 手动关闭并停止重连 */
     close() {
         this.closedByUser = true;

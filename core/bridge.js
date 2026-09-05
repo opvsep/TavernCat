@@ -229,8 +229,19 @@ export class NapcatBridge {
         await this._runTurn(norm, text);
     }
 
-    /** 新角色/新会话建立后：立刻把该角色的开场白注入聊天并发给 QQ（受 greetNewChat 开关控制） */
+    /** 新角色/新会话建立后：先发角色头像（如有），再立刻把开场白注入聊天并发给 QQ */
     async _sendNewChatGreeting(norm, characterKey) {
+        // 0) 自定义头像：先发图片（默认/无头像不发送），失败不影响后续
+        try {
+            const avatarUrl = this.host.getAvatarUrl?.(characterKey);
+            if (avatarUrl) {
+                const data = await this.bot.sendImage(norm.peerId, avatarUrl, norm.scope);
+                if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
+            }
+        } catch (err) {
+            this._log('warn', `角色头像发送失败（跳过，不影响开场白）: ${err?.message ?? err}`);
+        }
+
         if (this.settings.greetNewChat === false) {
             this._log('info', `已关闭“新会话开场白”，跳过 ${characterKey}`);
             return;
