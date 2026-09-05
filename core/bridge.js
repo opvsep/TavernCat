@@ -104,6 +104,9 @@ export class NapcatBridge {
         this.onLog = null;        // (level, text) 供 UI 展示
         this.onStats = null;      // ({queue, busy, inTurn, turnPeerKey, stats})
         this.stats = { received: 0, processed: 0, errors: 0 }; // 消息流计数（供 UI 判断“有没有实例在执行”）
+        this.seenMessages = new Map(); // "peerKey:messageId" -> ts（近期已处理消息去重）
+        this._seenTtlMs = 10 * 60 * 1000;
+        this._seenCap = 300;
         this._recentCap = 300;
         this._recentTtlMs = 30 * 60 * 1000;
 
@@ -155,6 +158,22 @@ export class NapcatBridge {
         const selfId = this.bot.selfId;
         const norm = normalizeMessageEvent(ev, selfId ?? ev.self_id);
         if (!norm) return;
+
+        // 消息去重：同一 (会话, message_id) 在 10 分钟内只处理一次（防重复推送/事件重发）
+        if (norm.messageId) {
+            const seenKey = `${norm.peerKey}:${norm.messageId}`;
+            const now = Date.now();
+            const old = this.seenMessages.get(seenKey);
+            if (old && now - old < this._seenTtlMs) {
+                this._log('info', `忽略重复消息 ${seenKey}（已处理过）`);
+                return;
+            }
+            this.seenMessages.set(seenKey, now);
+            while (this.seenMessages.size > this._seenCap) {
+                const oldest = this.seenMessages.keys().next().value;
+                this.seenMessages.delete(oldest);
+            }
+        }
 
         if (norm.scope === 'private') {
             const owners = (this.settings.ownerIds ?? []).map((x) => String(x));
@@ -231,6 +250,15 @@ export class NapcatBridge {
 
     /** 新角色/新会话建立后：先发角色头像（如搜得到），再立刻把开场白注入聊天并发给 QQ */
     async _sendNewChatGreeting(norm, characterKey) {
+        // 幂等：同一个聊天文件只发一次开场白（防止重复接入/重复事件导致双份）
+        const curBinding = this.settings.mapping?.[norm.peerKey];
+        const chatName = curBinding?.chatName;
+        const greetKey = chatName ? `${characterKey}|${chatName}` : null;
+        if (greetKey && this.settings.greeted?.[greetKey]) {
+            this._log('info', `聊天 ${chatName} 已发过开场白，跳过重复发送`);
+            return;
+        }
+
         // 0) 头像：host 侧已按“本地目录+文件存在”判定，没有/搜不到时返回 null 不发
         try {
             const avatar = await this.host.getAvatarImage?.(characterKey);
@@ -257,6 +285,12 @@ export class NapcatBridge {
                 .replaceAll('{{user}}', norm.senderName);
             await this.host.injectAssistantMessage(greeting);
             await this._sendToPeer(norm, greeting, { quote: false });
+            // 标记该聊天已发过开场白
+            if (greetKey) {
+                this.settings.greeted = this.settings.greeted ?? {};
+                this.settings.greeted[greetKey] = 1;
+                this.host.persist();
+            }
         } catch (err) {
             this._log('warn', `开场白发送失败: ${err?.message ?? err}`);
         }

@@ -1,6 +1,6 @@
 {
   "name": "tavern-cat",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "Tavern Cat: SillyTavern extension that connects NapCatQQ directly via OneBot 11 WebSocket, no third-party relay needed",
   "type": "module",
   "license": "MIT"
