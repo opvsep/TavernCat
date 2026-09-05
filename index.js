@@ -317,9 +317,13 @@ function buildHost() {
                             body: JSON.stringify({ avatar_url: ch.avatar }),
                             cache: 'no-cache',
                         });
-                        if (!res.ok) continue;
+                        if (!res.ok) {
+                            pushLog('warn', `角色 ${ch.name} 聊天接口 HTTP ${res.status}`);
+                            continue;
+                        }
                         const data = await res.json();
                         const entries = data && typeof data === 'object' ? Object.values(data) : [];
+                        pushLog('info', `角色「${ch.name}」聊天接口返回 ${entries.length} 条：${entries.map((e) => String(e?.file_name ?? e?.file_id ?? '?')).join('、')}`);
                         for (const e of entries) {
                             if (!e || typeof e !== 'object') continue;
                             const rawName = String(e.file_name ?? e.file_id ?? '');
@@ -817,7 +821,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.4';
+const VERSION = '0.7.5';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
