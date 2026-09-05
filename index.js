@@ -130,6 +130,21 @@ function findCharIndex(characterKey) {
     return hub.characters.findIndex((c) => String(c.avatar) === characterKey);
 }
 
+/** 该聊天名是否已被任何 QQ 会话绑定（mapping/bindings 中出现即“有主”） */
+function isChatNameBoundElsewhere(chatName, characterKey) {
+    try {
+        const cfg = config();
+        const refs = [];
+        for (const b of Object.values(cfg.mapping ?? {})) refs.push(String(b?.chatName ?? ''));
+        for (const map of Object.values(cfg.bindings ?? {})) {
+            for (const cn of Object.values(map ?? {})) refs.push(String(cn ?? ''));
+        }
+        return refs.some((cn) => cn && cn === chatName);
+    } catch {
+        return false;
+    }
+}
+
 function buildHost() {
     return {
         isReady: () => hub.characters.length > 0,
@@ -178,13 +193,26 @@ function buildHost() {
 
             let created = false;
             if (!chatName) {
-                const stackLine = (new Error()).stack?.split('\n').slice(2, 4).join(' ← ') ?? '';
-                pushLog('info', `[trace] ★ doNewChat 将被调用（调用方：${stackLine.trim()}）`);
-                await hub.doNewChat();
-                chatName = hub.getCurrentChatId();
-                pushLog('info', `[trace] doNewChat 完成 -> chat=${chatName}`);
-                if (!chatName) throw new Error('新建聊天失败');
-                created = true;
+                // 若切换后角色已停留在一个“无主的新空聊天”上（酒馆 ST 自动放过开场白/用户刚新建），
+                // 直接复用它作为绑定目标，避免再 doNewChat 造成“两个文件”
+                const curChat = hub.getCurrentChatId();
+                const ctxNow = getContext();
+                const freshUnbound = curChat
+                    && (ctxNow.chat?.length ?? 0) <= 1
+                    && !isChatNameBoundElsewhere(curChat, characterKey);
+                if (freshUnbound) {
+                    chatName = curChat;
+                    created = true;
+                    pushLog('info', `[trace] 复用无主新聊天 ${chatName}（不再新建）`);
+                } else {
+                    const stackLine = (new Error()).stack?.split('\n').slice(2, 4).join(' ← ') ?? '';
+                    pushLog('info', `[trace] ★ doNewChat 将被调用（调用方：${stackLine.trim()}）`);
+                    await hub.doNewChat();
+                    chatName = hub.getCurrentChatId();
+                    pushLog('info', `[trace] doNewChat 完成 -> chat=${chatName}`);
+                    if (!chatName) throw new Error('新建聊天失败');
+                    created = true;
+                }
             } else if (hub.getCurrentChatId() !== chatName) {
                 pushLog('info', `[trace] openCharacterChat -> ${chatName}`);
                 await hub.openCharacterChat(chatName);
@@ -272,6 +300,14 @@ function buildHost() {
             } finally {
                 injectingUser = false;
             }
+        },
+
+        /** 当前聊天是否已被酒馆自动放置过开场白（首条为助手消息且非扩展注入） */
+        hasExistingGreeting: () => {
+            const chat = getContext().chat;
+            if (chat.length === 0) return false;
+            const first = chat[0];
+            return !!(first && first.is_user === false && !first.extra?.qq);
         },
 
         injectAssistantMessage: async (text) => {
@@ -729,7 +765,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.7';
+const VERSION = '0.6.8';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {

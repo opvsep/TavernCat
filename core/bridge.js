@@ -286,7 +286,13 @@ export class NapcatBridge {
             const greeting = String(rawGreeting)
                 .replaceAll('{{char}}', this._charName(characterKey))
                 .replaceAll('{{user}}', norm.senderName);
-            await this.host.injectAssistantMessage(greeting);
+            // 若酒馆 ST 已自动放置过开场白（空聊天机制），不再重复注入，只回传 QQ
+            const alreadyAutoGreeted = await this.host.hasExistingGreeting?.();
+            if (alreadyAutoGreeted) {
+                this._log('info', '酒馆已自动放置开场白（ST 空聊天机制），跳过重复注入');
+            } else {
+                await this.host.injectAssistantMessage(greeting);
+            }
             await this._sendToPeer(norm, greeting, { quote: false });
             this._log('info', `开场白发送流程完成 greetKey=${greetKey ?? '(无)'}`);
             // 标记该聊天已发过开场白
