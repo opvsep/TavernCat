@@ -53,6 +53,13 @@ class StubTavern {
         return null; // 测试默认无自定义头像；需要时用例内覆写
     }
 
+    async fetchChatHistory() {
+        return [
+            { characterKey: 'av-w', chatName: 'W-聊天9', preview: '哼哼，我是W。' },
+            { characterKey: 'av-amiya', chatName: 'c1', preview: '你好呀' },
+        ];
+    }
+
     async injectUserMessage(text, meta = {}) {
         const key = `${this.current.characterKey}|${this.current.chatName}`;
         this.history[key].push({ role: 'user', name: meta.senderName ?? '我', text, extra: { qq: meta } });
@@ -492,7 +499,7 @@ test('角色有自定义头像：新接入时先发头像图片，再发开场�
     }
 });
 
-test('/历史 白名单可查看与切换；非白名单被拒绝', async () => {
+test('/历史 白名单可查看整个程序记录并切换；非白名单/未配置被拒绝', async () => {
     const ctx = await setup({
         settings: {
             ownerIds: [10086],
@@ -502,7 +509,7 @@ test('/历史 白名单可查看与切换；非白名单被拒绝', async () => 
         tavern: { greetings: {} },
     });
     try {
-        // 白名单用户查看历史：当前聊天置顶 + 阿米娅 c1
+        // 白名单用户查看整个程序的聊天记录
         ctx.server.pushPrivateMessage({ userId: 10086, nickname: '主人', messageId: 9901, segments: [{ type: 'text', data: { text: '/历史' } }] });
         assert.ok(await waitSentCount(ctx.server, 1));
         const list = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
@@ -510,11 +517,11 @@ test('/历史 白名单可查看与切换；非白名单被拒绝', async () => 
         assert.match(list, /阿米娅/);
         assert.match(list, /历史 <编号>/);
 
-        // 选择第 2 项 -> 切回 阿米娅/c1
+        // 选择第 2 项 -> 切到 阿米娅/c1
         ctx.server.pushPrivateMessage({ userId: 10086, nickname: '主人', messageId: 9902, segments: [{ type: 'text', data: { text: '/历史 2' } }] });
         assert.ok(await waitSentCount(ctx.server, 2));
         const sel = ctx.server.sent[1].params.message.map((m) => m.data.text ?? '').join('');
-        assert.match(sel, /已切换到历史聊天/);
+        assert.match(sel, /已切换到聊天/);
         assert.deepEqual(ctx.settings.mapping['p:10086'], { characterKey: 'av-amiya', chatName: 'c1' });
 
         // 非白名单用户（群内 @ 触发）被拒绝
@@ -525,6 +532,19 @@ test('/历史 白名单可查看与切换；非白名单被拒绝', async () => 
         assert.ok(await waitSentCount(ctx.server, 3));
         const deny = ctx.server.sent[2].params.message.map((m) => m.data.text ?? '').join('');
         assert.match(deny, /无权/);
+    } finally {
+        await teardown(ctx);
+    }
+});
+
+test('/历史 未配置白名单时拒绝使用（白名单不是摆设）', async () => {
+    const ctx = await setup({ settings: { ownerIds: [] }, tavern: { greetings: {} } });
+    try {
+        ctx.server.pushPrivateMessage({ userId: 10086, nickname: '主人', messageId: 9904, segments: [{ type: 'text', data: { text: '/历史' } }] });
+        assert.ok(await waitSentCount(ctx.server, 1));
+        const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
+        assert.match(t, /未配置白名单/);
+        assert.match(t, /私聊白名单/);
     } finally {
         await teardown(ctx);
     }

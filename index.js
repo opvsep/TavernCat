@@ -302,6 +302,32 @@ function buildHost() {
             }
         },
 
+        /** 拉取“整个程序”的聊天记录（跨角色，最近优先），供 /历史 选择 */
+        fetchChatHistory: async (max = 40) => {
+            try {
+                const headers = hub?.getRequestHeaders ? hub.getRequestHeaders() : {};
+                const res = await fetch('/api/chats/recent', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ max, pinned: [] }),
+                    cache: 'no-cache',
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                if (!Array.isArray(data)) return [];
+                return data
+                    .filter((c) => c.avatar && c.file_id && !c.group) // 仅角色聊天
+                    .map((c) => ({
+                        characterKey: c.avatar,
+                        chatName: c.file_id,
+                        preview: String(c.mes ?? '').replace(/\s+/g, ' ').slice(0, 30),
+                    }));
+            } catch (err) {
+                pushLog('warn', `读取程序聊天记录失败: ${err?.message ?? err}`);
+                return null;
+            }
+        },
+
         /** 当前聊天是否已被酒馆自动放置过开场白（首条为助手消息且非扩展注入） */
         hasExistingGreeting: () => {
             const chat = getContext().chat;
@@ -713,6 +739,13 @@ function bindAdvancedEvents(root) {
 
     $('#ncb_connect')?.addEventListener('click', connectBot);
     $('#ncb_disconnect')?.addEventListener('click', disconnectBot);
+    // 默认角色选择即时生效（改完即保存，避免忘点“保存设置”导致默认角色失效）
+    $('#ncb_defaultChar')?.addEventListener('change', () => {
+        const cfg = config();
+        cfg.defaultCharacterKey = $('#ncb_defaultChar').value;
+        persist();
+        toastr.success('默认角色已保存', APP_NAME);
+    });
     $('#ncb_save')?.addEventListener('click', () => {
         const cfg = config();
         cfg.wsUrl = $('#ncb_wsUrl').value.trim();
@@ -765,7 +798,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.6.9';
+const VERSION = '0.7.0';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {

@@ -80,7 +80,7 @@ export function chunkText(text, maxChars = 1800) {
     return chunks;
 }
 
-const COMMAND_NAMES = ['/指令', '/help', '/帮助', '/引导', '/历史', '/历史记录', '/角色列表', '/角色', '/重置', '/清空', '/解绑', '/初始化', '/状态', '/关闭', '/开启'];
+const COMMAND_NAMES = ['/指令', '/help', '/帮助', '/引导', '/历史', '/历史记录', '/新对话', '/角色列表', '/角色', '/重置', '/清空', '/解绑', '/初始化', '/状态', '/关闭', '/开启'];
 
 export class NapcatBridge {
     /**
@@ -317,7 +317,12 @@ export class NapcatBridge {
         if (!binding) {
             await this.host.waitForCharacters?.();
             const chars = this.host.listCharacters?.() ?? [];
-            const defaultKey = this.settings.defaultCharacterKey ?? chars[0]?.key;
+            let defaultKey = this.settings.defaultCharacterKey ?? chars[0]?.key;
+            // 默认角色已失效（角色卡被删/改名）时回退到第一个可用角色，避免“废了”
+            if (defaultKey && !chars.some((c) => c.key === defaultKey)) {
+                this._log('warn', `默认角色 ${defaultKey} 已不存在，回退到「${chars[0]?.name ?? '无'}」`);
+                defaultKey = chars[0]?.key ?? null;
+            }
             if (!defaultKey) {
                 this._log('error', `会话 ${peerKey} 无绑定且没有可用角色，请先在扩展面板设置默认角色`);
                 await this._safeReply(norm, '【Tavern Cat】当前暂时无法接入：酒馆角色列表为空，或尚未设置「新会话默认角色」。\n· 发送 /指令 可查看全部可用指令；\n· 请先在酒馆添加/导入角色卡并刷新页面，再在扩展「基础设置 → 新会话默认角色」里选好角色，然后重新发送消息。');
@@ -491,7 +496,8 @@ export class NapcatBridge {
                     '【Tavern Cat】可用指令：',
                     '/指令 - 显示本指令列表',
                     '/引导 - 查看当前接入状态与指引',
-                    '/历史 - 查看并切换本会话的历史聊天（仅白名单）',
+                    '/历史 - 列出并选择整个程序的聊天记录（仅白名单管理员）',
+                    '/新对话 - 直接开一个全新对话',
                     '/角色列表 - 查看可选角色',
                     '/角色 <名称或序号> - 切换本会话角色（新角色会立即发开场白）',
                     '/重置 - 清空本会话上下文并重新开场',
@@ -551,7 +557,8 @@ export class NapcatBridge {
                 break;
             }
             case '/重置':
-            case '/清空': {
+            case '/清空':
+            case '/新对话': {
                 const peerKey = norm.peerKey;
                 const binding = this.settings.mapping[peerKey];
                 if (!binding) {
@@ -589,22 +596,33 @@ export class NapcatBridge {
             case '/历史':
             case '/历史记录': {
                 const peerKey = norm.peerKey;
-                if (!this._isWhitelisted(norm.userId)) {
-                    reply = '无权使用该指令：/历史 仅限白名单用户调用（可在扩展「进阶设置 → 私聊白名单」中添加你的 QQ）。';
+                // 严格白名单：必须配置并命中白名单，否则一律拒绝
+                const owners = this.settings.ownerIds ?? [];
+                if (owners.length === 0) {
+                    reply = '未配置白名单：/历史 需要管理员权限。请先在扩展「进阶设置 → 私聊白名单」里添加你的 QQ 后再使用。';
                     break;
                 }
-                const items = this._historyItems(peerKey);
+                if (!owners.map((x) => String(x)).includes(String(norm.userId))) {
+                    reply = '无权使用该指令：/历史 仅限白名单用户调用。';
+                    break;
+                }
+                const items = await this.host.fetchChatHistory?.(40);
+                if (items === null) {
+                    reply = '读取程序聊天记录失败，请查看扩展日志。';
+                    break;
+                }
+                const current = this.settings.mapping?.[peerKey]?.chatName;
                 if (!args) {
                     if (items.length === 0) {
-                        reply = '本会话还没有历史聊天记录。';
-                    } else {
-                        reply = [
-                            '【Tavern Cat】本会话历史聊天：',
-                            ...items.map((it, i) => `${i + 1}. ${this._charName(it.characterKey)} · ${it.chatName}`),
-                            '',
-                            '回复 /历史 <编号> 切换到对应聊天（如 /历史 1）',
-                        ].join('\n');
+                        reply = '程序里还没有任何聊天记录（先在酒馆里和角色聊几句吧）。';
+                        break;
                     }
+                    const lines = items.map((it, i) => {
+                        const mark = it.chatName === current ? '（当前）' : '';
+                        const prev = it.preview ? ` —— ${it.preview}` : '';
+                        return `${i + 1}. ${this._charName(it.characterKey)} · ${it.chatName}${mark}${prev}`;
+                    });
+                    reply = ['【Tavern Cat】程序聊天记录（最近优先）：', ...lines, '', '回复 /历史 <编号> 把本会话切换到对应聊天（如 /历史 1）'].join('\n');
                 } else {
                     const n = Number(args);
                     const target = Number.isInteger(n) && n >= 1 && n <= items.length ? items[n - 1] : null;
@@ -619,7 +637,7 @@ export class NapcatBridge {
                         this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
                         this.settings.bindings[peerKey][target.characterKey] = chatName;
                         this.host.persist();
-                        reply = `已切换到历史聊天：「${this._charName(target.characterKey)}」/ ${chatName}（继续原对话）`;
+                        reply = `已切换到聊天「${this._charName(target.characterKey)}」/ ${chatName}（原对话继续）`;
                     } catch (err) {
                         reply = `切换失败：${err?.message ?? err}（该聊天可能已被删除）`;
                     }
