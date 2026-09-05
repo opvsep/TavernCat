@@ -319,8 +319,14 @@ function connectBot() {
         notify('error', '请先填写 NapCat WebSocket 地址');
         return;
     }
+    // 底层连接日志也进面板日志（方便排查连不上/被拒绝/超时）
+    const botLogger = {
+        log: (...a) => pushLog('info', a.map((x) => (x instanceof Error ? x.message : String(x))).join(' ')),
+        warn: (...a) => pushLog('warn', a.map((x) => (x instanceof Error ? x.message : String(x))).join(' ')),
+        error: (...a) => pushLog('error', a.map((x) => (x instanceof Error ? x.message : String(x))).join(' ')),
+    };
     try {
-        bot = new OneBotClient({ url: cfg.wsUrl.trim(), token: cfg.token?.trim() ?? '' });
+        bot = new OneBotClient({ url: cfg.wsUrl.trim(), token: cfg.token?.trim() ?? '', logger: botLogger });
     } catch (err) {
         notify('error', `创建连接失败：${err?.message ?? err}`);
         bot = null;
