@@ -408,9 +408,8 @@ test('无可用角色时不得沉默：向 QQ 回复原因说明', async () => {
         ctx.server.pushPrivateMessage({ userId: 666, nickname: '路人', messageId: 9601, segments: [{ type: 'text', data: { text: '你好' } }] });
         assert.ok(await waitSentCount(ctx.server, 1), '应回复一条说明');
         const t = ctx.server.sent[0].params.message.map((m) => m.data.text ?? '').join('');
-        assert.match(t, /Tavern Cat/, '说明消息带 Tavern Cat 前缀');
-        assert.match(t, /角色卡/, '说明应提示缺少角色卡');
-        assert.match(t, /\/指令/, '说明应引导使用 /指令');
+        assert.match(t, /\/新对话/, '说明应引导使用 /新对话');
+        assert.match(t, /无法自动接入/);
     } finally {
         await teardown(ctx);
     }
