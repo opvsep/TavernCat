@@ -585,7 +585,13 @@ function activePeerKey() {
     return hub.chat_metadata?.qq?.peerKey ?? null;
 }
 
+// “酒馆手动回合”标记：仅当用户在酒馆手动发了一条消息后，才允许把随后生成的
+// 助手回复回推给 QQ（一次手动回合只回推一条）。桥自己的回合（QQ→酒馆注入、
+// ST 自动开场白等）一律不回推，杜绝开场白/回复被重复转发。
+let manualTurnPeer = null;
+
 function onUserMessageSent(messageId) {
+    manualTurnPeer = null;
     if (injectingUser) return; // 桥自己注入的 QQ 消息
     const chat = getContext().chat;
     const m = chat[messageId];
@@ -593,6 +599,7 @@ function onUserMessageSent(messageId) {
     const peerKey = activePeerKey();
     if (!peerKey || !m.mes?.trim()) return;
     bridge.forwardUserMessage(peerKey, m.mes);
+    manualTurnPeer = peerKey; // 开启本手动回合的回复回推
 }
 
 function onAssistantMessageReceived(messageId) {
@@ -602,9 +609,8 @@ function onAssistantMessageReceived(messageId) {
     const peerKey = activePeerKey();
     if (!peerKey || !m.mes?.trim()) return;
     if (bridge.inTurn && bridge.turnPeerKey === peerKey) return; // 桥自动回合，已回传
-    // 该回复紧跟的上一轮若是 QQ 消息触发的，也跳过（防御重复回传）
-    const prev = [...chat.slice(0, messageId)].reverse().find((x) => x && (x.is_user || x.is_system));
-    if (prev?.is_user && prev.extra?.qq) return;
+    if (manualTurnPeer !== peerKey) return; // 非酒馆手动回合（ST 自动开场白/其它）不回推
+    manualTurnPeer = null; // 一次手动回合只回推一条最终回复
     bridge.forwardAssistantMessage(peerKey, m.mes);
 }
 
@@ -821,7 +827,7 @@ function bindAdvancedEvents(root) {
 
 // ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
 
-const VERSION = '0.7.5';
+const VERSION = '0.7.6';
 let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
 
 function closeSettingsModal() {
