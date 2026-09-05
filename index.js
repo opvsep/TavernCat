@@ -18,19 +18,8 @@ import { waitUntilCondition } from '../../../utils.js';
 import { is_group_generating } from '../../../group-chats.js';
 import { getMessageTimeStamp } from '../../../RossAscends-mods.js';
 import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
-import {
-    chat_metadata,
-    characters,
-    doNewChat,
-    Generate,
-    getCurrentChatId,
-    is_send_press,
-    openCharacterChat,
-    saveChatConditional,
-    saveSettingsDebounced,
-    selectCharacterById,
-    sendMessageAsUser,
-} from '../../../../script.js';
+// 注意：script.js 主模块（酒馆 hub）不静态导入——某版本若缺其中任一导出会导致扩展整体加载失败、界面静默无入口。
+// 改为 init() 中动态 import 并逐个检查（loadTavernHub），引用一律走 hub.xxx（ESM namespace 为 live 绑定）。
 import { OneBotClient } from './core/onebot.js';
 import { NapcatBridge, DEFAULT_SETTINGS } from './core/bridge.js';
 
@@ -62,6 +51,13 @@ const logLines = [];
 const MAX_LOG = 300;
 const menuDots = [];       // 魔法棒菜单里的状态圆点 <span>
 let statsTimer = null;
+let hub = null;            // 酒馆主模块（script.js）命名空间，init 时动态加载；hub.xxx 实时反映酒馆状态
+const HUB_KEYS = [
+    'chat_metadata', 'characters', 'doNewChat', 'Generate', 'getCurrentChatId',
+    'is_send_press', 'openCharacterChat', 'saveChatConditional',
+    'saveSettingsDebounced', 'selectCharacterById', 'sendMessageAsUser',
+];
+let missingHubApi = [];    // 当前酒馆版本缺失的 API（用于友好提示）
 
 // ---------------- 配置读写 ----------------
 
@@ -70,7 +66,28 @@ function config() {
 }
 
 function persist() {
-    saveSettingsDebounced();
+    if (hub?.saveSettingsDebounced) hub.saveSettingsDebounced();
+}
+
+/** 动态加载酒馆主模块并校验关键 API：缺失项进 missingHubApi 供 UI 提示，不让扩展整体崩溃 */
+async function loadTavernHub() {
+    try {
+        hub = await import('../../../../script.js');
+    } catch (err) {
+        console.error(`[${APP_NAME}] 酒馆主模块加载失败：`, err);
+        hub = null;
+    }
+    missingHubApi = [];
+    if (hub) {
+        for (const key of HUB_KEYS) {
+            if (!(key in hub)) missingHubApi.push(key);
+        }
+    } else {
+        missingHubApi = [...HUB_KEYS];
+    }
+    if (missingHubApi.length > 0) {
+        console.error(`[${APP_NAME}] 当前酒馆版本缺少 API：${missingHubApi.join(', ')}（需 SillyTavern 1.18+）`);
+    }
 }
 
 function parseOwnerIds(text) {
@@ -105,19 +122,19 @@ function notify(kind, text) {
 // ---------------- TavernHost ----------------
 
 function charKeyOf(id) {
-    const c = characters[Number(id)];
+    const c = hub.characters[Number(id)];
     return c ? String(c.avatar) : null;
 }
 
 function findCharIndex(characterKey) {
-    return characters.findIndex((c) => String(c.avatar) === characterKey);
+    return hub.characters.findIndex((c) => String(c.avatar) === characterKey);
 }
 
 function buildHost() {
     return {
-        isReady: () => characters.length > 0,
+        isReady: () => hub.characters.length > 0,
 
-        listCharacters: () => characters.map((c) => ({ key: String(c.avatar), name: c.name })),
+        listCharacters: () => hub.characters.map((c) => ({ key: String(c.avatar), name: c.name })),
 
         current: () => {
             const ctx = getContext();
@@ -125,8 +142,8 @@ function buildHost() {
                 characterKey: ctx.characterId !== undefined && ctx.characterId !== null
                     ? charKeyOf(ctx.characterId)
                     : null,
-                chatName: getCurrentChatId() ?? null,
-                peerKey: chat_metadata?.qq?.peerKey ?? null,
+                chatName: hub.getCurrentChatId() ?? null,
+                peerKey: hub.chat_metadata?.qq?.peerKey ?? null,
             };
         },
 
@@ -142,13 +159,13 @@ function buildHost() {
                 ? -1 : Number(ctx.characterId);
 
             if (curId !== idx) {
-                // selectCharacterById 在酒馆保存繁忙时会静默返回：必须校验 + 重试
+                // hub.selectCharacterById 在酒馆保存繁忙时会静默返回：必须校验 + 重试
                 let switched = false;
                 for (let attempt = 0; attempt < 5 && !switched; attempt++) {
                     try {
-                        await waitUntilCondition(() => !is_send_press && !is_group_generating, 10000, 100);
+                        await waitUntilCondition(() => !hub.is_send_press && !is_group_generating, 10000, 100);
                     } catch { /* 继续尝试 */ }
-                    await selectCharacterById(idx);
+                    await hub.selectCharacterById(idx);
                     const afterId = getContext().characterId;
                     switched = afterId !== undefined && afterId !== null && String(afterId) === String(idx);
                     if (!switched && attempt < 4) await new Promise((r) => setTimeout(r, 300));
@@ -158,19 +175,19 @@ function buildHost() {
 
             let created = false;
             if (!chatName) {
-                await doNewChat();
-                chatName = getCurrentChatId();
+                await hub.doNewChat();
+                chatName = hub.getCurrentChatId();
                 if (!chatName) throw new Error('新建聊天失败');
                 created = true;
-            } else if (getCurrentChatId() !== chatName) {
-                await openCharacterChat(chatName);
-                if (getCurrentChatId() !== chatName) throw new Error(`打开聊天失败: ${chatName}`);
+            } else if (hub.getCurrentChatId() !== chatName) {
+                await hub.openCharacterChat(chatName);
+                if (hub.getCurrentChatId() !== chatName) throw new Error(`打开聊天失败: ${chatName}`);
             }
 
             // 打上“绑定到哪个 QQ 会话”的聊天级标记（随聊天文件存盘）
-            if (peerKey && chat_metadata?.qq?.peerKey !== peerKey) {
-                chat_metadata.qq = { peerKey };
-                await saveChatConditional();
+            if (peerKey && hub.chat_metadata?.qq?.peerKey !== peerKey) {
+                hub.chat_metadata.qq = { peerKey };
+                await hub.saveChatConditional();
             }
             return { chatName, created };
         },
@@ -178,7 +195,7 @@ function buildHost() {
         getGreeting: (characterKey) => {
             const idx = findCharIndex(characterKey);
             if (idx < 0) return '';
-            const c = characters[idx];
+            const c = hub.characters[idx];
             return c?.first_mes ?? c?.data?.first_mes ?? '';
         },
 
@@ -187,10 +204,10 @@ function buildHost() {
             if (!ctx.chatId) throw new Error('当前没有打开的聊天');
             injectingUser = true;
             try {
-                const msg = await sendMessageAsUser(String(text), undefined, null, false, meta.senderName || '我');
+                const msg = await hub.sendMessageAsUser(String(text), undefined, null, false, meta.senderName || '我');
                 msg.extra.qq = { peerKey: meta.peerKey, userId: meta.userId, senderName: meta.senderName };
-                chat_metadata.qq = { peerKey: meta.peerKey };
-                await saveChatConditional();
+                hub.chat_metadata.qq = { peerKey: meta.peerKey };
+                await hub.saveChatConditional();
             } finally {
                 injectingUser = false;
             }
@@ -198,7 +215,7 @@ function buildHost() {
 
         injectAssistantMessage: async (text) => {
             const ctx = getContext();
-            const ch = characters[Number(ctx.characterId)];
+            const ch = hub.characters[Number(ctx.characterId)];
             const message = {
                 name: ch?.name ?? '角色',
                 is_user: false,
@@ -208,7 +225,7 @@ function buildHost() {
                 extra: { qq: { assistant: true } },
             };
             ctx.chat.push(message);
-            await saveChatConditional();
+            await hub.saveChatConditional();
             const id = ctx.chat.length - 1;
             await eventSource.emit(event_types.MESSAGE_RECEIVED, id, 'extension');
             ctx.addOneMessage(message);
@@ -216,7 +233,7 @@ function buildHost() {
 
         waitTurnReady: async (timeoutMs = 60000) => {
             try {
-                await waitUntilCondition(() => !is_send_press && !is_group_generating, timeoutMs, 100);
+                await waitUntilCondition(() => !hub.is_send_press && !is_group_generating, timeoutMs, 100);
             } catch {
                 throw new Error('酒馆正在生成中，等待超时，请稍后再试');
             }
@@ -227,7 +244,7 @@ function buildHost() {
             let error = '';
             let stopped = false;
             try {
-                await Generate('normal');
+                await hub.Generate('normal');
             } catch (err) {
                 error = String(err?.message ?? err);
                 stopped = /abort|stop|取消|中断/i.test(error);
@@ -345,7 +362,7 @@ function disconnectBot() {
 
 /** 当前打开的聊天绑定的 QQ 会话（聊天级标记），没有则为 null */
 function activePeerKey() {
-    return chat_metadata?.qq?.peerKey ?? null;
+    return hub.chat_metadata?.qq?.peerKey ?? null;
 }
 
 function onUserMessageSent(messageId) {
@@ -383,7 +400,7 @@ function populateCharSelect(sel, currentKey) {
     hint.value = '';
     hint.textContent = '（不指定：新会话自动使用列表第一个角色）';
     sel.appendChild(hint);
-    for (const c of characters) {
+    for (const c of hub.characters) {
         const opt = document.createElement('option');
         opt.value = String(c.avatar);
         opt.textContent = c.name;
@@ -515,7 +532,7 @@ function refreshSessionTable() {
     if (!tbody) return;
     tbody.innerHTML = '';
     const cfg = config();
-    const names = new Map(characters.map((c) => [String(c.avatar), c.name]));
+    const names = new Map(hub.characters.map((c) => [String(c.avatar), c.name]));
     const rows = Object.entries(cfg.mapping ?? {}).sort((a, b) => a[0].localeCompare(b[0]));
     for (const [peerKey, binding] of rows) {
         const tr = document.createElement('tr');
@@ -624,6 +641,13 @@ function mountMenu() {
 // ---------------- 扩展入口 ----------------
 
 export async function init() {
+    // 动态加载酒馆主模块（缺失时给出可见提示，不让扩展静默消失）
+    await loadTavernHub();
+    if (missingHubApi.length > 0) {
+        const tip = `当前酒馆版本缺少部分 API（${missingHubApi.slice(0, 4).join('、')}${missingHubApi.length > 4 ? ' 等' : ''}），建议升级 SillyTavern 1.18+；菜单与设置仍可用，对话功能可能受限。`;
+        pushLog('error', tip);
+        notify('error', tip);
+    }
     // v0.1 旧配置（napcatBridge）迁移到新命名空间
     if (extension_settings.napcatBridge && !extension_settings[MODULE]) {
         extension_settings[MODULE] = extension_settings.napcatBridge;
