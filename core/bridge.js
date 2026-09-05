@@ -265,6 +265,9 @@ export class NapcatBridge {
             if (avatar?.file) {
                 const data = await this.bot.sendImage(norm.peerId, avatar.file, norm.scope);
                 if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
+                this._log('info', `头像已发送 message_id=${data?.message_id ?? '?'}`);
+            } else {
+                this._log('info', '头像未发送（host 返回空）');
             }
         } catch (err) {
             this._log('warn', `角色头像发送失败（跳过，不影响开场白）: ${err?.message ?? err}`);
@@ -285,6 +288,7 @@ export class NapcatBridge {
                 .replaceAll('{{user}}', norm.senderName);
             await this.host.injectAssistantMessage(greeting);
             await this._sendToPeer(norm, greeting, { quote: false });
+            this._log('info', `开场白发送流程完成 greetKey=${greetKey ?? '(无)'}`);
             // 标记该聊天已发过开场白
             if (greetKey) {
                 this.settings.greeted = this.settings.greeted ?? {};
@@ -415,6 +419,7 @@ export class NapcatBridge {
                 data = await this.bot.sendText(norm.peerId, chunks[i], norm.scope);
             }
             if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
+            this._log('info', `回传 ${norm.scope} ${norm.peerId} 第${i + 1}/${chunks.length}块 message_id=${data?.message_id ?? '?'}：${chunks[i].slice(0, 24)}`);
         }
     }
 
