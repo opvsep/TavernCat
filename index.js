@@ -17,7 +17,8 @@ import { getContext } from '../../../st-context.js';
 import { waitUntilCondition } from '../../../utils.js';
 import { is_group_generating } from '../../../group-chats.js';
 import { getMessageTimeStamp } from '../../../RossAscends-mods.js';
-import { callGenericPopup, POPUP_TYPE } from '../../../popup.js';
+// 不依赖酒馆的 callGenericPopup/Popup：其内部 DOM 结构随版本变化且尺寸难控，
+// 设置窗口由本扩展自绘（openAdvancedPanel），保证 800x600 稳定呈现。
 // 注意：script.js 主模块（酒馆 hub）不静态导入——某版本若缺其中任一导出会导致扩展整体加载失败、界面静默无入口。
 // 改为 init() 中动态 import 并逐个检查（loadTavernHub），引用一律走 hub.xxx（ESM namespace 为 live 绑定）。
 import { OneBotClient } from './core/onebot.js';
@@ -413,6 +414,8 @@ function renderStats() {
 function refreshAdvancedPanel() {
     if (!advancedEl) return;
     const cfg = config();
+    const verEl = advancedEl.querySelector('#tc_ver');
+    if (verEl) verEl.textContent = `v${VERSION}`;
 
     advancedEl.querySelector('#ncb_wsUrl').value = cfg.wsUrl ?? '';
     advancedEl.querySelector('#ncb_token').value = cfg.token ?? '';
@@ -517,22 +520,64 @@ function bindAdvancedEvents(root) {
     });
 }
 
+// ---------------- 设置窗口（自绘弹窗：固定 800x600，不依赖酒馆 popup 内部样式） ----------------
+
+const VERSION = '0.3.0';
+let modalOverlay = null;   // 当前打开的遮罩层（自绘弹窗）
+
+function closeSettingsModal() {
+    if (!modalOverlay) return;
+    const esc = modalOverlay._escHandler;
+    if (esc) document.removeEventListener('keydown', esc, true);
+    modalOverlay.remove();
+    modalOverlay = null;
+    advancedEl = null;
+}
+
 async function openAdvancedPanel() {
+    if (modalOverlay) return; // 已打开则不重复
+    let html;
     try {
-        const html = await renderExtensionTemplateAsync(EXT_ID, 'settings', {}, false);
-        const wrap = document.createElement('div');
-        wrap.innerHTML = html;
-        advancedEl = wrap.querySelector('#ncb_root');
-        if (!advancedEl) advancedEl = wrap;
-        bindAdvancedEvents(advancedEl);
-        refreshAdvancedPanel();
-        await callGenericPopup(advancedEl, POPUP_TYPE.TEXT, '', { okButton: '关闭' });
+        html = await renderExtensionTemplateAsync(EXT_ID, 'settings', {}, false);
     } catch (err) {
-        console.error(`[${APP_NAME}] 打开进阶设置失败`, err);
+        console.error(`[${APP_NAME}] 加载设置面板模板失败`, err);
         notify('error', `打开面板失败：${err?.message ?? err}`);
-    } finally {
-        advancedEl = null;
+        return;
     }
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    const panel = wrap.querySelector('#ncb_root') ?? wrap;
+
+    // 右上角关闭按钮
+    const closeBtn = document.createElement('div');
+    closeBtn.className = 'fa-solid fa-circle-xmark tc-modal-close';
+    closeBtn.title = '关闭设置';
+    closeBtn.addEventListener('click', closeSettingsModal);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'tc-modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'tc-modal';
+    modal.appendChild(panel);
+    modal.appendChild(closeBtn);
+    overlay.appendChild(modal);
+    // 点遮罩空白处关闭
+    overlay.addEventListener('mousedown', (ev) => {
+        if (ev.target === overlay) closeSettingsModal();
+    });
+    // ESC 关闭
+    const escHandler = (ev) => {
+        if (ev.key === 'Escape') closeSettingsModal();
+    };
+    overlay._escHandler = escHandler;
+    document.addEventListener('keydown', escHandler, true);
+
+    advancedEl = panel; // 供状态同步/刷新/日志查询元素
+    document.body.appendChild(overlay);
+    modalOverlay = overlay;
+
+    bindAdvancedEvents(panel);
+    refreshAdvancedPanel();
 }
 
 // ---------------- 魔法棒菜单（单入口：图标 + 名称 + 行尾状态点） ----------------
