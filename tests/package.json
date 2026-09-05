@@ -1,0 +1,11 @@
+{
+  "name": "tavern-cat-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-force-exit"
+  },
+  "devDependencies": {
+    "ws": "^8.18.0"
+  }
+}

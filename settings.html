@@ -1,0 +1,71 @@
+<div id="ncb_root" class="tc-panel">
+    <div class="tc-title"><img class="tc-logo" src="https://camo.githubusercontent.com/b1e872f1bb3e3cfba16a94dee84ae17fb9fc9038a95b04e1538cc88a4ee92507/68747470733a2f2f6e61706e656b6f2e6769746875622e696f2f6173736574732f6e65776e65776c6f676f2e706e67" alt="NapCat" /> Tavern Cat · 进阶设置</div>
+
+    <div class="tc-section">
+        <div class="tc-title"><i class="fa-solid fa-plug"></i> NapCat 连接</div>
+        <div class="tc-row">
+            <span id="ncb_status_dot" class="ncb-dot ncb-off"></span>
+            <span id="ncb_status_text">未连接</span>
+            <button id="ncb_connect" class="menu_button">连接</button>
+            <button id="ncb_disconnect" class="menu_button" disabled>断开</button>
+            <label class="ncb-inline"><input type="checkbox" id="ncb_autoConnect"> 打开酒馆页面时自动连接</label>
+        </div>
+    </div>
+
+    <div class="tc-section">
+        <div class="tc-title"><i class="fa-solid fa-gear"></i> 配置（点「保存设置」生效）</div>
+        <div class="tc-grid">
+            <label>NapCat WS 地址
+                <input type="text" id="ncb_wsUrl" placeholder="ws://127.0.0.1:3001">
+            </label>
+            <label>Access Token（NapCat 网络配置里没开就留空）
+                <input type="password" id="ncb_token" placeholder="可选">
+            </label>
+            <label>新会话默认角色
+                <select id="ncb_defaultChar"></select>
+            </label>
+            <label>群聊回复模式
+                <select id="ncb_groupMode">
+                    <option value="at_reply">@机器人 / 回复机器人才回（推荐）</option>
+                    <option value="at_only">只有 @ 机器人才回</option>
+                    <option value="all">群里所有消息都回</option>
+                </select>
+            </label>
+            <label class="tc-span2">私聊白名单（逗号分隔 QQ 号；留空 = 允许任何人私聊）
+                <input type="text" id="ncb_ownerIds" placeholder="例如 10001,10002">
+            </label>
+            <label>群聊回引用触发的那条消息
+                <input type="checkbox" id="ncb_replyQuote" checked>
+            </label>
+            <label>新会话自动发送角色开场白
+                <input type="checkbox" id="ncb_greetNewChat" checked>
+            </label>
+            <label>单条 QQ 消息最大字符数
+                <input type="number" id="ncb_maxChars" min="100" max="4000" value="1800">
+            </label>
+        </div>
+        <div class="tc-row">
+            <button id="ncb_save" class="menu_button">保存设置</button>
+            <span id="ncb_stats" class="tc-stats"></span>
+        </div>
+    </div>
+
+    <div class="tc-section">
+        <div class="tc-title"><i class="fa-solid fa-list"></i> QQ 会话绑定
+            <span class="tc-hint">首次使用：把机器人拉进群并 @它，或直接私聊它，会自动按默认角色建会话</span>
+        </div>
+        <table class="tc-table">
+            <thead><tr><th>QQ 会话</th><th>角色</th><th>聊天文件</th><th>操作</th></tr></thead>
+            <tbody id="ncb_sessions"></tbody>
+        </table>
+    </div>
+
+    <div class="tc-section">
+        <div class="tc-title"><i class="fa-solid fa-terminal"></i> 日志
+            <button id="ncb_clear_log" class="menu_button tc-small">清空</button>
+        </div>
+        <pre id="ncb_log" class="tc-log"></pre>
+    </div>
+
+    <div class="tc-tip">QQ 群里可用 /帮助、/角色列表、/角色 &lt;名称&gt;、/重置、/关闭、/开启、/状态（群聊需 @机器人触发指令）。酒馆当前聊天若绑定了 QQ 会话，在酒馆里手动发的消息与角色回复也会实时同步到 QQ。</div>
+</div>

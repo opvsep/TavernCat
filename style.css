@@ -1,0 +1,191 @@
+/* Tavern Cat —— 设置面板与魔法棒菜单样式 */
+
+.tc-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 560px;
+    max-width: 760px;
+    text-align: left;
+    font-size: 13px;
+}
+
+.tc-section {
+    border: 1px solid var(--SmartThemeBorderColor, #555);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: rgba(128, 128, 128, 0.06);
+}
+
+.tc-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tc-hint {
+    font-weight: 400;
+    opacity: 0.65;
+    font-size: 12px;
+}
+
+.tc-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.tc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 14px;
+    margin-bottom: 8px;
+}
+
+.tc-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    opacity: 0.95;
+}
+
+.tc-span2 {
+    grid-column: span 2;
+}
+
+.tc-grid input[type='text'],
+.tc-grid input[type='password'],
+.tc-grid input[type='number'],
+.tc-grid select {
+    width: 100%;
+}
+
+.tc-grid input[type='checkbox'] {
+    align-self: start;
+}
+
+.ncb-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.tc-stats {
+    opacity: 0.7;
+}
+
+.tc-small {
+    padding: 2px 8px !important;
+    font-size: 12px !important;
+}
+
+.tc-danger {
+    color: #e74c3c;
+}
+
+.tc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.tc-table th,
+.tc-table td {
+    border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+    padding: 4px 6px;
+    text-align: left;
+}
+
+.tc-table .ncb-ops {
+    white-space: nowrap;
+}
+
+.ncb-empty {
+    opacity: 0.6;
+}
+
+.tc-log {
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 6px;
+    padding: 8px;
+    max-height: 180px;
+    overflow: auto;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.tc-tip {
+    opacity: 0.75;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 连接状态点（面板内） */
+.ncb-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.ncb-dot.ncb-ok {
+    background: #2ecc71;
+    box-shadow: 0 0 6px #2ecc71;
+}
+
+.ncb-dot.ncb-busy {
+    background: #f1c40f;
+    box-shadow: 0 0 6px #f1c40f;
+    animation: tc-blink 1s infinite;
+}
+
+.ncb-dot.ncb-off {
+    background: #95a5a6;
+}
+
+@keyframes tc-blink {
+    50% { opacity: 0.3; }
+}
+
+/* NapCat logo */
+.tc-logo {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.tc-title .tc-logo {
+    width: 24px;
+    height: 24px;
+}
+
+/* 魔法棒菜单项状态点 */
+.tc-menu-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.tc-menu-dot.tc-ok {
+    background: #2ecc71;
+    box-shadow: 0 0 5px #2ecc71;
+}
+
+.tc-menu-dot.tc-busy {
+    background: #f1c40f;
+    box-shadow: 0 0 5px #f1c40f;
+    animation: tc-blink 1s infinite;
+}
+
+.tc-menu-dot.tc-off {
+    background: #95a5a6;
+}

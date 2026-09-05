@@ -1,0 +1,14 @@
+{
+    "display_name": "Tavern Cat",
+    "loading_order": 150,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Tavern Cat contributors",
+    "version": "0.2.0",
+    "homePage": "",
+    "hooks": {
+        "activate": "init"
+    }
+}

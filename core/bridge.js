@@ -1,0 +1,496 @@
+// 桥接编排核心：QQ 会话 <-> 酒馆会话（每个 QQ 群/好友 = 酒馆里一个“角色+聊天文件”）
+//
+// 本文件不依赖 SillyTavern 的任何全局对象，只通过下方 TavernHost 接口与酒馆交互，
+// 因此可以在 Node 里用桩宿主做端到端测试。酒馆侧的薄胶水层（index.js）负责实现 TavernHost。
+//
+// TavernHost 接口（由 index.js 实现）：
+//   isReady() -> boolean                   角色/设置是否就绪
+//   listCharacters() -> [{key, name}]      key = 角色的稳定标识（用头像文件名）
+//   switchTo(characterKey, chatName|null)  切到指定角色的指定聊天；chatName=null 表示新建聊天
+//        -> {chatName, created}            返回最终 chatName（聊天文件主名）
+//   current() -> {characterKey, chatName, peerKey}
+//   injectUserMessage(text, {senderName})  把一条消息作为“用户”写入当前聊天并落盘
+//   injectAssistantMessage(text, {name})   把一条消息作为“助手”写入当前聊天并落盘（开场白用）
+//   getGreeting(characterKey) -> string|null  该角色的开场白原文（未宏替换）
+//   waitTurnReady(timeoutMs) -> Promise     等 ST 空闲（无生成锁、无保存中）
+//   generateReply() -> Promise<{text, error, stopped}>  生成一条助手回复并落盘（text=正文）
+//   notify(kind, text)                      UI 通知（'info'|'error'）
+//   persist()                               设置变更后持久化
+//
+// 配置（settings 对象，直接由调用方持有并持久化）：
+//   mapping:    { [peerKey]: {characterKey, chatName} }      每个会话当前绑定
+//   bindings:   { [peerKey]: { [characterKey]: chatName } }  历史绑定（切角色可回到旧聊天）
+//   peerEnabled:{ [peerKey]: boolean }                       会话级开关
+//   groupMode: 'at_reply' | 'at_only' | 'all'
+//   ownerIds: number[]      私聊白名单（空 = 允许所有人私聊）
+//   replyQuote: boolean     群聊回引用触发消息
+//   greetNewChat: boolean   新建会话时先发角色开场白
+//   maxReplyChars: number   单条 QQ 消息上限（超出按换行切分）
+
+import { normalizeMessageEvent, shouldTrigger } from './triggers.js';
+
+export const DEFAULT_SETTINGS = {
+    mapping: {},
+    bindings: {},
+    peerEnabled: {},
+    groupMode: 'at_reply',
+    ownerIds: [],
+    replyQuote: true,
+    greetNewChat: true,
+    maxReplyChars: 1800,
+};
+
+/** 把长文本切成 <=maxChars 的块。按“行”打包，保证 chunks.join('\n') === 原文（超长单行按字数硬切）。 */
+export function chunkText(text, maxChars = 1800) {
+    const raw = String(text ?? '').replace(/\r\n/g, '\n');
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    const lines = trimmed.split('\n');
+    const chunks = [];
+    let cur = '';
+    const flush = () => {
+        if (cur !== '') { chunks.push(cur); cur = ''; }
+    };
+    const pushPieces = (line) => {
+        // 超长单行：按字符硬切
+        let rest = line;
+        while (rest.length > maxChars) {
+            chunks.push(rest.slice(0, maxChars));
+            rest = rest.slice(maxChars);
+        }
+        cur = rest;
+    };
+    for (const line of lines) {
+        if (!cur) {
+            if (line.length > maxChars) pushPieces(line);
+            else cur = line;
+            continue;
+        }
+        const candidate = `${cur}\n${line}`;
+        if (candidate.length <= maxChars) {
+            cur = candidate;
+        } else {
+            flush();
+            if (line.length > maxChars) pushPieces(line);
+            else cur = line;
+        }
+    }
+    flush();
+    return chunks;
+}
+
+const COMMAND_NAMES = ['/帮助', '/help', '/角色列表', '/角色', '/重置', '/清空', '/状态', '/关闭', '/开启'];
+
+export class NapcatBridge {
+    /**
+     * @param {object} deps
+     * @param {import('./onebot.js').OneBotClient} deps.bot
+     * @param {object} deps.host    TavernHost
+     * @param {object} deps.settings 配置对象（调用方持久化）
+     * @param {object} [deps.logger]
+     */
+    constructor({ bot, host, settings, logger } = {}) {
+        this.bot = bot;
+        this.host = host;
+        this.settings = settings;
+        this.logger = logger ?? console;
+
+        this.queue = [];          // 待处理 QQ 消息
+        this.draining = false;
+        this.inTurn = false;      // 正在跑一次“注入+生成+回传”回合（用于酒馆→QQ 转发判定）
+        this.turnPeerKey = null;
+        this.recentSent = new Map(); // peerKey -> [{id, time}]
+        this.onLog = null;        // (level, text) 供 UI 展示
+        this.onStats = null;      // ({queue, busy, inTurn, turnPeerKey})
+        this._recentCap = 300;
+        this._recentTtlMs = 30 * 60 * 1000;
+
+        // 消息事件入口（挂给 bot.onEvent）
+        if (bot) this.setBot(bot);
+    }
+
+    /** 更换底层连接（连接/断开/改地址时用），并重挂事件入口 */
+    setBot(bot) {
+        this.bot = bot;
+        if (bot) bot.onEvent = (ev) => this.onOneBotEvent(ev);
+    }
+
+    // ---------- 日志 ----------
+    _log(level, text) {
+        this.logger[level === 'error' ? 'error' : 'log']?.(`[TavernCat] ${text}`);
+        if (this.onLog) {
+            try { this.onLog(level, text); } catch { /* 忽略 */ }
+        }
+    }
+
+    // ---------- 公共查询 ----------
+    isPeerEnabled(peerKey) {
+        return this.settings.peerEnabled[peerKey] !== false;
+    }
+
+    setPeerEnabled(peerKey, enabled) {
+        this.settings.peerEnabled[peerKey] = enabled;
+        this.host.persist();
+    }
+
+    unbindPeer(peerKey) {
+        delete this.settings.mapping[peerKey];
+        delete this.settings.bindings[peerKey];
+        this.host.persist();
+    }
+
+    getBinding(peerKey) {
+        return this.settings.mapping[peerKey] ?? null;
+    }
+
+    // ---------- 事件入口 ----------
+    onOneBotEvent(ev) {
+        if (ev.post_type !== 'message') return;
+        const selfId = this.bot.selfId;
+        const norm = normalizeMessageEvent(ev, selfId ?? ev.self_id);
+        if (!norm) return;
+
+        if (norm.scope === 'private') {
+            const owners = (this.settings.ownerIds ?? []).map((x) => String(x));
+            if (owners.length > 0 && !owners.includes(String(norm.userId))) {
+                this._log('info', `忽略非白名单私聊 ${norm.userId}`);
+                return;
+            }
+        }
+        // 会话级开关：关闭时只放行 /开启（群内还需 @ 到机器人，防止被群友随意开启）
+        const isEnableCmd = norm.text.trim().startsWith('/开启');
+        if (!this.isPeerEnabled(norm.peerKey)) {
+            if (!isEnableCmd) {
+                this._log('info', `会话 ${norm.peerKey} 已关闭，忽略`);
+                return;
+            }
+            if (norm.scope === 'group' && !norm.atSelf && !norm.atAll) {
+                this._log('info', `群会话 ${norm.peerKey} 已关闭且未 @ 机器人，忽略 /开启`);
+                return;
+            }
+        }
+
+        this.queue.push(norm);
+        this._log('info', `入队 ${norm.peerKey} ${norm.senderName}: ${norm.text.slice(0, 60)}`);
+        this._emitStats();
+        void this.drain();
+    }
+
+    async drain() {
+        if (this.draining) return;
+        this.draining = true;
+        try {
+            while (this.queue.length > 0) {
+                if (!this.bot?.isConnected) {
+                    // 断线期间先压住，等重连后再处理
+                    this._log('warn', 'NapCat 未连接，暂停处理队列');
+                    break;
+                }
+                const norm = this.queue.shift();
+                try {
+                    await this._processOne(norm);
+                } catch (err) {
+                    this._log('error', `处理 ${norm.peerKey} 消息失败: ${err?.message ?? err}`);
+                }
+                this._emitStats();
+            }
+        } finally {
+            this.draining = false;
+            if (this.queue.length > 0 && this.bot?.isConnected) void this.drain();
+        }
+    }
+
+    // ---------- 单条消息 ----------
+    async _processOne(norm) {
+        const triggered = shouldTrigger(norm, {
+            groupMode: this.settings.groupMode,
+            recentSentIds: this._recentIds(norm.peerKey),
+        });
+        if (!triggered.trigger) {
+            this._log('info', `群 ${norm.peerId} 未触发（${triggered.reason}），跳过`);
+            return;
+        }
+
+        const text = norm.text.trim();
+        // 指令优先（群里也只有触发时才会到这里）
+        if (text.startsWith('/')) {
+            await this._runCommand(norm, text);
+            return;
+        }
+
+        await this._runTurn(norm, text);
+    }
+
+    /** 一次完整回合：定位/创建会话 -> 注入用户消息 -> 生成 -> 回传 */
+    async _runTurn(norm, text) {
+        const peerKey = norm.peerKey;
+        let binding = this.settings.mapping[peerKey] ?? null;
+
+        // 1) 没有绑定 -> 用默认角色新建
+        if (!binding) {
+            const chars = this.host.listCharacters?.() ?? [];
+            const defaultKey = this.settings.defaultCharacterKey ?? chars[0]?.key;
+            if (!defaultKey) {
+                this._log('error', `会话 ${peerKey} 无绑定且没有可用角色，请先在扩展面板设置默认角色`);
+                return;
+            }
+            binding = { characterKey: defaultKey, chatName: null };
+        }
+
+        // 2) 确保酒馆里该会话的聊天被激活（必要时新建）
+        const chars = this.host.listCharacters?.() ?? [];
+        const charExists = chars.some((c) => c.key === binding.characterKey);
+        if (!charExists) {
+            this._log('error', `角色 ${binding.characterKey} 不存在，请重新绑定`);
+            return;
+        }
+
+        let switched;
+        try {
+            switched = await this.host.switchTo(binding.characterKey, binding.chatName ?? null, peerKey);
+        } catch (err) {
+            this._log('error', `切换会话失败: ${err?.message ?? err}`);
+            return;
+        }
+        const chatName = switched.chatName;
+        binding = { characterKey: binding.characterKey, chatName };
+        this.settings.mapping[peerKey] = binding;
+        this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
+        this.settings.bindings[peerKey][binding.characterKey] = chatName;
+        this.host.persist();
+
+        // 3) 新建会话 -> 先放开场白并回传
+        if (switched.created && this.settings.greetNewChat) {
+            try {
+                const rawGreeting = this.host.getGreeting?.(binding.characterKey) ?? '';
+                if (rawGreeting.trim()) {
+                    const greeting = rawGreeting
+                        .replaceAll('{{char}}', this._charName(binding.characterKey))
+                        .replaceAll('{{user}}', norm.senderName);
+                    await this.host.injectAssistantMessage(greeting);
+                    await this._sendToPeer(norm, greeting, { quote: false });
+                }
+            } catch (err) {
+                this._log('warn', `开场白注入失败: ${err?.message ?? err}`);
+            }
+        }
+
+        // 4) 注入 QQ 消息（打 QQ 来源标记，防止回推死循环）
+        this.inTurn = true;
+        this.turnPeerKey = peerKey;
+        this._emitStats();
+        try {
+            await this.host.waitTurnReady?.(60000);
+            await this.host.injectUserMessage(text, { senderName: norm.senderName, userId: norm.userId, peerKey });
+            const result = await this.host.generateReply();
+            if (result.error) {
+                this._log('error', `生成失败: ${result.error}`);
+                return;
+            }
+            const reply = (result.text ?? '').trim();
+            if (!reply) {
+                this._log('warn', '生成结果为空，不回传');
+                return;
+            }
+            await this._sendToPeer(norm, reply, { quote: this.settings.replyQuote !== false && norm.scope === 'group' });
+        } finally {
+            this.inTurn = false;
+            this.turnPeerKey = null;
+            this._emitStats();
+        }
+    }
+
+    // ---------- 发送回传（含引用/分块/记录 message_id） ----------
+    async _sendToPeer(norm, text, { quote = false } = {}) {
+        const chunks = chunkText(text, this.settings.maxReplyChars || 1800);
+        if (chunks.length === 0) return;
+        for (let i = 0; i < chunks.length; i++) {
+            let data;
+            // 引用的是“触发这条回复的 QQ 消息”本身（norm.messageId），便于在群里对齐上下文
+            if (i === 0 && quote && norm.messageId) {
+                data = await this.bot.sendReplyText(norm.messageId, norm.peerId, chunks[i], norm.scope);
+            } else {
+                data = await this.bot.sendText(norm.peerId, chunks[i], norm.scope);
+            }
+            if (data?.message_id) this._rememberSent(norm.peerKey, data.message_id);
+        }
+    }
+
+    _rememberSent(peerKey, messageId) {
+        let list = this.recentSent.get(peerKey);
+        if (!list) {
+            list = [];
+            this.recentSent.set(peerKey, list);
+        }
+        list.push({ id: String(messageId), time: Date.now() });
+        while (list.length > this._recentCap) list.shift();
+        const cutoff = Date.now() - this._recentTtlMs;
+        while (list.length && list[0].time < cutoff) list.shift();
+    }
+
+    _recentIds(peerKey) {
+        const list = this.recentSent.get(peerKey) ?? [];
+        return new Set(list.map((x) => x.id));
+    }
+
+    _charName(characterKey) {
+        return this.host.listCharacters?.().find((c) => c.key === characterKey)?.name ?? characterKey;
+    }
+
+    // ---------- 指令 ----------
+    async _runCommand(norm, text) {
+        const parts = text.split(/\s+/).filter(Boolean);
+        const cmd = parts[0];
+        const args = parts.slice(1).join(' ');
+        const chars = this.host.listCharacters?.() ?? [];
+        let reply = '';
+
+        switch (cmd) {
+            case '/help':
+            case '/帮助':
+                reply = [
+                    '【NapCat 酒馆桥】可用指令：',
+                    '/角色列表 - 查看可选角色',
+                    '/角色 <名称或序号> - 切换本会话角色（对话自动分开）',
+                    '/重置 - 清空本会话上下文并开新对话',
+                    '/状态 - 查看本会话绑定',
+                    '/关闭 / /开启 - 暂停/恢复本会话',
+                ].join('\n');
+                break;
+            case '/角色列表': {
+                if (chars.length === 0) {
+                    reply = '当前没有任何可用角色，请先在酒馆添加角色卡。';
+                } else {
+                    reply = ['可选角色：', ...chars.map((c, i) => `${i + 1}. ${c.name}`)].join('\n');
+                }
+                break;
+            }
+            case '/角色': {
+                if (!args) {
+                    reply = '用法：/角色 <名称或序号>，可用 /角色列表 查看';
+                    break;
+                }
+                const num = Number(args);
+                const target = Number.isInteger(num) && num >= 1 && num <= chars.length
+                    ? chars[num - 1]
+                    : chars.find((c) => c.name === args || c.key === args);
+                if (!target) {
+                    reply = `没有找到角色「${args}」，可用 /角色列表 查看`;
+                    break;
+                }
+                const peerKey = norm.peerKey;
+                const oldBinding = this.settings.mapping[peerKey];
+                // 优先回到这个角色在本会话用过的旧聊天
+                const oldChat = this.settings.bindings[peerKey]?.[target.key] ?? null;
+                const binding = { characterKey: target.key, chatName: oldChat };
+                try {
+                    const switched = await this.host.switchTo(target.key, oldChat, peerKey);
+                    binding.chatName = switched.chatName;
+                    this.settings.mapping[peerKey] = binding;
+                    this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
+                    this.settings.bindings[peerKey][target.key] = binding.chatName;
+                    this.host.persist();
+                    const note = oldBinding?.characterKey === target.key ? '' : `（${switched.created ? '新对话' : '继续旧对话'}）`;
+                    reply = `已切换到角色「${target.name}」${note}`;
+                } catch (err) {
+                    reply = `切换失败：${err?.message ?? err}`;
+                }
+                break;
+            }
+            case '/重置':
+            case '/清空': {
+                const peerKey = norm.peerKey;
+                const binding = this.settings.mapping[peerKey];
+                if (!binding) {
+                    reply = '本会话尚未绑定角色。';
+                    break;
+                }
+                try {
+                    const switched = await this.host.switchTo(binding.characterKey, null, peerKey); // 新建
+                    binding.chatName = switched.chatName;
+                    this.settings.bindings[peerKey] = this.settings.bindings[peerKey] ?? {};
+                    this.settings.bindings[peerKey][binding.characterKey] = switched.chatName;
+                    this.host.persist();
+                    reply = '已开新对话，上下文已清空。';
+                } catch (err) {
+                    reply = `重置失败：${err?.message ?? err}`;
+                }
+                break;
+            }
+            case '/状态': {
+                const peerKey = norm.peerKey;
+                const binding = this.settings.mapping[peerKey];
+                const enabled = this.isPeerEnabled(peerKey) ? '开启' : '关闭';
+                reply = binding
+                    ? `本会话：角色「${this._charName(binding.characterKey)}」 / 聊天 ${binding.chatName ?? '(未创建)'}\n状态：${enabled}`
+                    : `本会话尚未绑定角色（状态：${enabled}）\n可用 /角色列表 查看角色，/角色 <名称> 绑定。`;
+                break;
+            }
+            case '/关闭':
+                this.setPeerEnabled(norm.peerKey, false);
+                reply = '本会话已暂停（酒馆桥不再回复）。用 /开启 恢复。';
+                break;
+            case '/开启':
+                this.setPeerEnabled(norm.peerKey, true);
+                reply = '本会话已恢复。';
+                break;
+            default:
+                return; // 非桥指令：放给 LLM（比如用户和角色扮演中提及 /）
+        }
+
+        if (reply) {
+            try {
+                await this._sendToPeer(norm, reply, { quote: norm.scope === 'group' });
+            } catch (err) {
+                this._log('error', `指令回传失败: ${err?.message ?? err}`);
+            }
+        }
+    }
+
+    // ---------- 酒馆 -> QQ 方向 ----------
+    /**
+     * 用户在酒馆手动发的消息（无 QQ 来源标记且当前聊天绑定某 QQ 会话）：
+     * 转发给对应 QQ 会话。返回 true 表示已转发。
+     */
+    async forwardUserMessage(peerKey, text) {
+        if (!this.bot?.isConnected) return false;
+        if (!this.isPeerEnabled(peerKey)) return false;
+        const target = parsePeerKey(peerKey);
+        if (!target) return false;
+        try {
+            const data = await this.bot.sendText(target.peerId, String(text).trim(), target.scope);
+            if (data?.message_id) this._rememberSent(peerKey, data.message_id);
+            this._log('info', `酒馆 -> ${peerKey}: ${String(text).slice(0, 40)}`);
+            return true;
+        } catch (err) {
+            this._log('error', `酒馆转发失败 ${peerKey}: ${err?.message ?? err}`);
+            return false;
+        }
+    }
+
+    /**
+     * 酒馆侧助手新回复的回推：仅在“这轮不是桥自动回合”时使用（由胶水层判断来源），
+     * 避免把桥自己生成的回复二次回传。
+     */
+    async forwardAssistantMessage(peerKey, text) {
+        if (this.inTurn && this.turnPeerKey === peerKey) return false;
+        return this.forwardUserMessage(peerKey, text);
+    }
+
+    _emitStats() {
+        if (this.onStats) {
+            try {
+                this.onStats({ queue: this.queue.length, draining: this.draining, inTurn: this.inTurn, turnPeerKey: this.turnPeerKey });
+            } catch { /* 忽略 */ }
+        }
+    }
+}
+
+/** 'g:123' / 'p:456' -> {scope, peerId}；解析失败返回 null */
+export function parsePeerKey(peerKey) {
+    const m = /^(g|p):(\d+)$/.exec(String(peerKey ?? ''));
+    if (!m) return null;
+    return { scope: m[1] === 'g' ? 'group' : 'private', peerId: Number(m[2]) };
+}
+
+export { COMMAND_NAMES };
