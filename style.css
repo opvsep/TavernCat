@@ -1,12 +1,35 @@
 /* Tavern Cat —— 设置面板与魔法棒菜单样式 */
 
+/* 让酒馆弹窗容器按本面板尺寸铺开（默认 #dialogue_popup 只有 500px 宽） */
+#dialogue_popup:has(.tc-panel) {
+    width: min(800px, 96vw);
+    max-width: 96vw;
+    padding: 8px;
+}
+
 .tc-panel {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    width: min(560px, 94vw);
+    gap: 10px;
+    width: 800px;
+    max-width: 96vw;
+    height: 600px;
+    max-height: 88vh;
     text-align: left;
     font-size: 13px;
+    box-sizing: border-box;
+}
+
+/* 中段滚动区：头部/标签/底部固定，内容超高时只在这里滚动 */
+.tc-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 2px 6px 2px 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .tc-section {
@@ -110,8 +133,8 @@
     background: rgba(0, 0, 0, 0.35);
     border-radius: 6px;
     padding: 8px;
-    max-height: 180px;
-    overflow: auto;
+    min-height: 72px;
+    overflow: visible;
     font-size: 11.5px;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -198,7 +221,9 @@
 }
 
 .tc-tabpage {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .tc-footer {
